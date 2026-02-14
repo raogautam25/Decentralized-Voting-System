@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Candidate Nomination Form</title>
+    <link rel="stylesheet" type="text/css" href="/css/candidate_nomination.css?v=20260214a" />
+  </head>
+
+  <body>
+    <main class="page">
+      <header class="page-header">
+        <div class="badge">
+          <span class="dot" aria-hidden="true"></span>
+          Official Submission Portal
+        </div>
+        <h1>Candidate Nomination Form</h1>
+        <p class="subtitle">Government-style layout with real-time validation and duplicate protection.</p>
+      </header>
+
+      <section class="card" aria-label="Nomination Form">
+        <div id="alertArea" class="alerts" aria-live="polite"></div>
+
+        <form id="nominationForm" novalidate>
+          <section class="section">
+            <div class="section-head">
+              <h2>1. Election Details</h2>
+              <p>Basic election metadata (optional, for records).</p>
+            </div>
+            <div class="grid2">
+              <div class="field">
+                <input id="election_name" name="election_name" type="text" placeholder=" " autocomplete="off" />
+                <label for="election_name">Election Name</label>
+                <div class="error" id="election_name_error"></div>
+              </div>
+              <div class="field">
+                <input id="position" name="position" type="text" placeholder=" " autocomplete="off" />
+                <label for="position">Position</label>
+                <div class="error" id="position_error"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="section">
+            <div class="section-head">
+              <h2>2. Candidate Details</h2>
+              <p>Required fields are marked with an asterisk.</p>
+            </div>
+            <div class="grid2">
+              <div class="field">
+                <input id="full_name" name="full_name" type="text" placeholder=" " autocomplete="off" required />
+                <label for="full_name">Full Name <span class="req">*</span></label>
+                <div class="error" id="full_name_error"></div>
+              </div>
+              <div class="field">
+                <input id="date_of_birth" name="date_of_birth" type="date" placeholder=" " required />
+                <label for="date_of_birth">Date of Birth <span class="req">*</span></label>
+                <div class="error" id="date_of_birth_error"></div>
+              </div>
+
+              <div class="field span2">
+                <textarea id="address" name="address" rows="3" placeholder=" "></textarea>
+                <label for="address">Address</label>
+                <div class="error" id="address_error"></div>
+              </div>
+
+              <div class="field">
+                <input id="contact_number" name="contact_number" type="tel" placeholder=" " autocomplete="off" />
+                <label for="contact_number">Contact Number</label>
+                <div class="error" id="contact_number_error"></div>
+              </div>
+              <div class="field">
+                <input id="id_number" name="id_number" type="text" placeholder=" " autocomplete="off" required />
+                <label for="id_number">ID Number <span class="req">*</span></label>
+                <div class="error" id="id_number_error"></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="section">
+            <div class="section-head">
+              <h2>3. Party Affiliation</h2>
+              <p>Party name must be unique. Select Independent if applicable.</p>
+            </div>
+            <div class="grid2">
+              <div class="field">
+                <input id="party_name" name="party_name" type="text" placeholder=" " autocomplete="off" />
+                <label for="party_name">Party Name</label>
+                <div class="error" id="party_name_error"></div>
+              </div>
+
+              <div class="field">
+                <select id="party_symbol" name="party_symbol">
+                  <option value="none">Select a symbol</option>
+                  <option value="torch">Torch</option>
+                  <option value="eagle">Eagle</option>
+                  <option value="tree">Tree</option>
+                  <option value="sun">Sun</option>
+                  <option value="scale">Scales</option>
+                  <option value="star">Star</option>
+                </select>
+                <label for="party_symbol">Party Symbol</label>
+                <div class="error" id="party_symbol_error"></div>
+              </div>
+
+              <div class="check span2">
+                <label class="check-inner">
+                  <input id="is_independent" name="is_independent" type="checkbox" />
+                  <span class="check-box" aria-hidden="true"></span>
+                  <span class="check-text">
+                    <span class="check-title">Independent Candidate</span>
+                    <span class="check-sub">Disables party fields and skips party duplicate checks.</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <section class="section">
+            <div class="section-head">
+              <h2>4. Actions</h2>
+              <p>Submission is disabled until validation passes.</p>
+            </div>
+            <div class="actions">
+              <div class="rules">
+                Required:
+                <b>Full Name</b>, <b>Date of Birth</b>, <b>ID Number</b>
+              </div>
+              <div class="buttons">
+                <button id="submitBtn" type="submit" class="btn btn-primary" disabled>Add Candidate</button>
+              </div>
+            </div>
+          </section>
+        </form>
+      </section>
+
+      <footer class="page-footer">
+        Deep blue, white, and gray palette. Accessible focus states and inline validation.
+      </footer>
+    </main>
+
+    <script src="/js/candidate_nomination.js?v=20260214a" type="module"></script>
+  </body>
+</html>

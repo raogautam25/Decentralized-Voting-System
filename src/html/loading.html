@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Processing Vote</title>
+
+    <link rel="stylesheet" type="text/css" href="../css/loading.css">
+    
+  </head>
+  <body>
+    <div class="container">
+      <div class="text-center">
+        <h1>Decentralized Voting Using Ethereum Blockchain</h1>
+        <h2>Processing Your Vote</h2>
+      </div>
+
+      <div class="loading-container">
+        <div class="spinner"></div>
+        <p class="loading-text" id="loadingMessage">Your vote is being processed on the blockchain...</p>
+        <p class="loading-info" id="loadingInfo">Please do not close this window</p>
+        
+        <div class="transaction-info">
+          <h3>Transaction Status: <span id="txStatus" class="status-pending">Pending</span></h3>
+          <p>Transaction Hash: <span id="txHash" class="text-muted">Waiting...</span></p>
+          <p>Block Number: <span id="blockNumber" class="text-muted">Pending...</span></p>
+          <p>Confirmations: <span id="confirmationCount" class="text-muted">0</span>/<span id="confirmationTarget" class="text-muted">1</span></p>
+        </div>
+      </div>
+
+      <div class="progress-container">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+
+      <div id="errorContainer" class="error-container" style="display:none;">
+        <div class="alert alert-danger">
+          <h4>Transaction Failed</h4>
+          <p id="errorMessage"></p>
+          <button id="retryBtn" class="btn btn-primary">Retry</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.0/umd/popper.min.js"></script>
+    <script src="../js/loading.js?v=20260214c" type="module"></script>
+  </body>
+</html>
