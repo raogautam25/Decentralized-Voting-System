@@ -88,6 +88,26 @@ This document outlines all the pages in the voting application and their purpose
 - **Location**: `src/html/index.html`
 - **Note**: Consider redirecting to `voter.html` for consistency
 
+### 7. **Public Vote Verifier** (`verify-vote.html`)
+- **Purpose**: Verify a vote by transaction hash (Etherscan-style)
+- **Location**: `src/html/verify_vote.html`
+- **Styling**: `src/css/public_verifier.css`
+- **Script**: `src/js/verify_vote.js`
+- **Features**:
+  - Enter transaction hash and validate on blockchain
+  - Shows candidate, block number, timestamp, wallet, gas used
+  - Supports quick prefill from last transaction saved in localStorage
+
+### 8. **Blockchain Explorer** (`explorer.html`)
+- **Purpose**: Public transparency page for vote events + on-chain result table
+- **Location**: `src/html/explorer.html`
+- **Styling**: `src/css/public_verifier.css`
+- **Script**: `src/js/explorer.js`
+- **Features**:
+  - Displays on-chain candidate vote counts
+  - Lists vote events (`VoteCast`) with tx links to verifier page
+  - Refresh action for live updates
+
 ## Navigation Flow
 
 ```
@@ -106,9 +126,10 @@ login.html
                 └── Click "Confirm Vote"
                     └── loading.html
                         └── [Monitor blockchain transaction]
-                            └── vote.html (Success Page)
+                            └── vote.html (Success summary)
                                 ├── [Show confirmation]
-                                └── Back to voter.html
+                                ├── Verify via verify-vote.html
+                                └── Explore via explorer.html
 ```
 
 ## Local Storage Keys
@@ -124,6 +145,7 @@ The following keys are used to maintain state between pages:
 - `txConfirmations`: Number of blockchain confirmations
 - `blockNumber`: Block number where transaction was mined
 - `voteSubmittedTime`: ISO timestamp of vote submission
+- `lastTxSummary`: Last confirmed vote summary used by verifier shortcut
 
 ## CSS Classes and Styling
 

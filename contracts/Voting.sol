@@ -20,6 +20,7 @@ contract Voting {
     event CandidateAdded(uint indexed id, string name, string party);
     event Voted(address indexed voter, uint indexed candidateId);
     event VotedByQr(address indexed operator, uint indexed candidateId, bytes32 indexed qrHash);
+    event VoteCast(address indexed voter, uint indexed candidateId, uint256 timestamp);
     event DatesSet(uint256 start, uint256 end);
 
     function addCandidate(string memory name, string memory party) public returns (uint) {
@@ -49,6 +50,7 @@ contract Voting {
         candidates[candidateID].voteCount++;
 
         emit Voted(msg.sender, candidateID);
+        emit VoteCast(msg.sender, candidateID, block.timestamp);
     }
     
     function checkVote() public view returns (bool) {
@@ -72,6 +74,7 @@ contract Voting {
         candidates[candidateID].voteCount++;
 
         emit VotedByQr(msg.sender, candidateID, qrHash);
+        emit VoteCast(msg.sender, candidateID, block.timestamp);
     }
 
     function checkVoteByQr(string memory qrToken) public view returns (bool) {

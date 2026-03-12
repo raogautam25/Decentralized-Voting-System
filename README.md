@@ -38,6 +38,8 @@ npx truffle migrate --reset --network development
 - Admin: `http://127.0.0.1:8080/admin.html?Authorization=Bearer <JWT>`
 - Voter: `http://127.0.0.1:8080/voter.html`
 - Vote: `http://127.0.0.1:8080/vote.html`
+- Verify Vote: `http://127.0.0.1:8080/verify-vote.html`
+- Explorer: `http://127.0.0.1:8080/explorer.html`
 - API docs: `http://127.0.0.1:8000/docs`
 
 ## Admin Features
@@ -53,6 +55,8 @@ npx truffle migrate --reset --network development
 2. QR token auto-detected and auto-verified (camera image captured)
 3. Vote buttons are disabled until verification completes
 4. Vote page requires a live photo capture before allowing the vote submission
+5. Public verifier can validate the vote using transaction hash
+6. Explorer page shows on-chain vote events and live result table
 
 ## Notes
 

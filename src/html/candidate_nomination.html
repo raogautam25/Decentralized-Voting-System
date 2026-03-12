@@ -29,6 +29,11 @@
             </div>
             <div class="grid2">
               <div class="field">
+                <input id="election_id" name="election_id" type="text" placeholder=" " autocomplete="off" />
+                <label for="election_id">Election ID</label>
+                <div class="error" id="election_id_error"></div>
+              </div>
+              <div class="field">
                 <input id="election_name" name="election_name" type="text" placeholder=" " autocomplete="off" />
                 <label for="election_name">Election Name</label>
                 <div class="error" id="election_name_error"></div>
@@ -103,6 +108,19 @@
                 <div class="error" id="party_symbol_error"></div>
               </div>
 
+              <div class="field span2">
+                <input id="party_symbol_upload" name="party_symbol_upload" type="file" accept="image/png,image/jpeg,image/jpg" />
+                <label for="party_symbol_upload" class="inline-label">Upload Party Symbol Image</label>
+                <div class="error" id="party_symbol_upload_error"></div>
+              </div>
+
+              <div class="symbol-preview span2">
+                <div class="symbol-preview__box">
+                  <img id="partySymbolPreview" alt="Party symbol preview" hidden />
+                  <div id="partySymbolPreviewEmpty" class="symbol-preview__empty">No party symbol selected</div>
+                </div>
+              </div>
+
               <div class="check span2">
                 <label class="check-inner">
                   <input id="is_independent" name="is_independent" type="checkbox" />
@@ -124,7 +142,7 @@
             <div class="actions">
               <div class="rules">
                 Required:
-                <b>Full Name</b>, <b>Date of Birth</b>, <b>ID Number</b>
+                <b>Full Name</b>, <b>Date of Birth</b>, <b>ID Number</b>. Candidate must be at least 18 years old.
               </div>
               <div class="buttons">
                 <button id="submitBtn" type="submit" class="btn btn-primary" disabled>Add Candidate</button>

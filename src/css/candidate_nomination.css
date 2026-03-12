@@ -167,6 +167,14 @@ form { display: grid; gap: 14px; }
   transition: transform 140ms ease, color 140ms ease, top 140ms ease, font-size 140ms ease;
 }
 
+.field .inline-label {
+  position: static;
+  display: inline-block;
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: #475569;
+}
+
 .req { color: var(--err); font-weight: 700; }
 
 /* Floating label behavior */
@@ -215,6 +223,35 @@ input[type="date"]:focus::-webkit-datetime-edit { color: inherit; }
   border-radius: 16px;
   background: #f8fafc;
   padding: 12px;
+}
+
+.symbol-preview {
+  display: flex;
+  align-items: center;
+}
+
+.symbol-preview__box {
+  width: 180px;
+  min-height: 120px;
+  border: 1px dashed var(--line2);
+  border-radius: 16px;
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+
+.symbol-preview__box img {
+  max-width: 100%;
+  max-height: 96px;
+  object-fit: contain;
+}
+
+.symbol-preview__empty {
+  font-size: 13px;
+  color: #64748b;
+  text-align: center;
 }
 
 .check-inner {

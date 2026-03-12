@@ -1,20 +1,25 @@
-  # Import required modules
 import base64
 import csv
 import datetime
-import dotenv
+import glob
 import io
 import os
-import glob
-import uuid
+import re
+import secrets
+import string
 import traceback
+import uuid
+
+import dotenv
+import jwt
 import mysql.connector
-from fastapi import FastAPI, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from mysql.connector import errorcode
-import jwt
+
+from duplicate_detection import find_similar_image
 
 # Loading the environment variables
 dotenv.load_dotenv()
@@ -58,15 +63,195 @@ MEDIA_DIR = os.path.join(os.path.dirname(__file__), "media")
 os.makedirs(MEDIA_DIR, exist_ok=True)
 app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
 
+MINIMUM_AGE_YEARS = 18
+DEFAULT_ELECTION_ID = "default-election"
+VOTER_ID_ALPHABET = string.ascii_uppercase + string.digits
+
+
+def calculate_age(date_of_birth, today=None):
+    today = today or datetime.date.today()
+    return today.year - date_of_birth.year - (
+        (today.month, today.day) < (date_of_birth.month, date_of_birth.day)
+    )
+
+
+def ensure_minimum_age(date_of_birth, subject_label):
+    if calculate_age(date_of_birth) < MINIMUM_AGE_YEARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{subject_label} must be at least {MINIMUM_AGE_YEARS} years old",
+        )
+
+
+def parse_iso_date(raw_value, field_name="date_of_birth"):
+    try:
+        parsed = datetime.date.fromisoformat((raw_value or "").strip())
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be YYYY-MM-DD")
+
+    if parsed >= datetime.date.today():
+        raise HTTPException(status_code=400, detail=f"{field_name} must be in the past")
+    return parsed
+
+
+def slugify(value):
+    normalized = re.sub(r"[^a-zA-Z0-9]+", "-", str(value or "").strip().lower()).strip("-")
+    return normalized or DEFAULT_ELECTION_ID
+
+
+def derive_election_id(payload):
+    explicit = (payload.get("election_id") or "").strip()
+    if explicit:
+        return slugify(explicit)
+    return slugify(payload.get("election_name") or DEFAULT_ELECTION_ID)
+
+
+def normalize_name(value):
+    return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def save_image_bytes(image_bytes, mime, prefix):
+    if not image_bytes:
+        return None
+    ext = "jpg"
+    if mime == "image/png":
+        ext = "png"
+    filename = f"{prefix}_{uuid.uuid4().hex}.{ext}"
+    rel_path = os.path.join("media", filename)
+    abs_path = os.path.join(os.path.dirname(__file__), rel_path)
+    with open(abs_path, "wb") as file_obj:
+        file_obj.write(image_bytes)
+    return rel_path.replace("\\", "/")
+
+
+def drop_index_if_exists(table_name, index_name):
+    cursor.execute(f"SHOW INDEX FROM {table_name}")
+    index_names = {row[2] for row in cursor.fetchall()}
+    if index_name in index_names:
+        cursor.execute(f"ALTER TABLE {table_name} DROP INDEX {index_name}")
+
+
+def create_index_if_missing(table_name, index_name, ddl):
+    cursor.execute(f"SHOW INDEX FROM {table_name}")
+    index_names = {row[2] for row in cursor.fetchall()}
+    if index_name not in index_names:
+        cursor.execute(ddl)
+
+
+def get_election_state():
+    cursor.execute(
+        "SELECT start_ts, end_ts, status, updated_at, reconduct_count, stopped_at FROM election_config WHERE id = 1"
+    )
+    row = cursor.fetchone()
+    if not row:
+        return {
+            "start_ts": 0,
+            "end_ts": 0,
+            "status": "running",
+            "updated_at": None,
+            "reconduct_count": 0,
+            "stopped_at": None,
+        }
+    return {
+        "start_ts": int(row[0] or 0),
+        "end_ts": int(row[1] or 0),
+        "status": row[2] or "running",
+        "updated_at": str(row[3]) if row[3] else None,
+        "reconduct_count": int(row[4] or 0),
+        "stopped_at": str(row[5]) if row[5] else None,
+    }
+
+
+def ensure_election_running():
+    state = get_election_state()
+    if state["status"] == "stopped":
+        raise HTTPException(status_code=409, detail="Election is currently stopped")
+    return state
+
+
+def generate_unique_voter_id():
+    for _ in range(64):
+        candidate = "".join(secrets.choice(VOTER_ID_ALPHABET) for _ in range(10))
+        cursor.execute("SELECT voter_id FROM voters WHERE voter_id = %s LIMIT 1", (candidate,))
+        if not cursor.fetchone():
+            return candidate
+    raise HTTPException(status_code=500, detail="Unable to generate a unique voter ID")
+
+
+def candidate_exists_in_database(full_name, date_of_birth, contact_number, id_number):
+    cursor.execute(
+        """
+        SELECT id
+        FROM candidate_nominations
+        WHERE LOWER(TRIM(full_name)) = %s
+          AND date_of_birth = %s
+          AND COALESCE(contact_number, '') = %s
+          AND id_number = %s
+        LIMIT 1
+        """,
+        (normalize_name(full_name), date_of_birth, contact_number or "", id_number),
+    )
+    return cursor.fetchone() is not None
+
+
+def candidate_exists_for_election(election_id, full_name, date_of_birth, id_number):
+    cursor.execute(
+        """
+        SELECT id
+        FROM candidate_nominations
+        WHERE election_id = %s
+          AND LOWER(TRIM(full_name)) = %s
+          AND date_of_birth = %s
+          AND id_number = %s
+        LIMIT 1
+        """,
+        (election_id, normalize_name(full_name), date_of_birth, id_number),
+    )
+    return cursor.fetchone() is not None
+
+
+def candidate_id_exists_for_election(candidate_id, election_id):
+    if not candidate_id:
+        return False
+    cursor.execute(
+        """
+        SELECT id
+        FROM candidate_nominations
+        WHERE candidate_id = %s AND election_id = %s
+        LIMIT 1
+        """,
+        (candidate_id, election_id),
+    )
+    return cursor.fetchone() is not None
+
+
+def find_existing_voter_duplicate(full_name, date_of_birth, image_bytes):
+    cursor.execute(
+        """
+        SELECT COALESCE(image_path, photo_path)
+        FROM voters
+        WHERE LOWER(TRIM(full_name)) = %s
+          AND date_of_birth = %s
+          AND is_active = 1
+        """,
+        (normalize_name(full_name), date_of_birth),
+    )
+    existing_paths = [row[0] for row in cursor.fetchall() if row[0]]
+    if not existing_paths:
+        return None
+    return find_similar_image(image_bytes, existing_paths, os.path.dirname(__file__))
+
 
 def ensure_schema():
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS voters (
             voter_id VARCHAR(64) PRIMARY KEY,
-            password VARCHAR(255) NOT NULL,
+            password VARCHAR(255) NULL,
             role VARCHAR(16) NOT NULL DEFAULT 'user',
             full_name VARCHAR(120),
+            date_of_birth DATE NULL,
+            image_path VARCHAR(255),
             photo_path VARCHAR(255),
             qr_token VARCHAR(128) UNIQUE,
             is_active TINYINT DEFAULT 1,
@@ -81,7 +266,10 @@ def ensure_schema():
             name VARCHAR(120) NOT NULL,
             party VARCHAR(120) NOT NULL,
             symbol VARCHAR(64),
-            votes INT NOT NULL DEFAULT 0
+            date_of_birth DATE NULL,
+            party_symbol_image VARCHAR(255) NULL,
+            votes INT NOT NULL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -124,15 +312,19 @@ def ensure_schema():
             id INT PRIMARY KEY,
             start_ts BIGINT NOT NULL DEFAULT 0,
             end_ts BIGINT NOT NULL DEFAULT 0,
+            status VARCHAR(20) NOT NULL DEFAULT 'running',
+            reconduct_count INT NOT NULL DEFAULT 0,
+            stopped_at TIMESTAMP NULL,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         )
         """
     )
-
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS candidate_nominations (
             id INT AUTO_INCREMENT PRIMARY KEY,
+            candidate_id INT NULL,
+            election_id VARCHAR(128) NOT NULL DEFAULT 'default-election',
             election_name VARCHAR(160) NULL,
             position VARCHAR(160) NULL,
             full_name VARCHAR(160) NOT NULL,
@@ -142,39 +334,87 @@ def ensure_schema():
             id_number VARCHAR(64) NOT NULL,
             party_name VARCHAR(120) NULL,
             party_symbol VARCHAR(64) NULL,
+            party_symbol_image VARCHAR(255) NULL,
             is_independent TINYINT NOT NULL DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE KEY uq_candidate_fullname_dob (full_name, date_of_birth),
-            UNIQUE KEY uq_candidate_party_name (party_name),
-            UNIQUE KEY uq_candidate_id_number (id_number)
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
 
-    # Single-row config
-    cursor.execute("INSERT IGNORE INTO election_config (id, start_ts, end_ts) VALUES (1, 0, 0)")
-    # Existing deployments may have an older voters schema (name/email only).
-    # Add required columns incrementally so /admin/voters works without manual DB reset.
+    cursor.execute(
+        """
+        INSERT IGNORE INTO election_config (id, start_ts, end_ts)
+        VALUES (1, 0, 0)
+        """
+    )
+
     cursor.execute("SHOW COLUMNS FROM voters")
-    existing_cols = {row[0] for row in cursor.fetchall()}
-
-    if "full_name" not in existing_cols:
+    voter_cols = {row[0] for row in cursor.fetchall()}
+    if "full_name" not in voter_cols:
         cursor.execute("ALTER TABLE voters ADD COLUMN full_name VARCHAR(120) NULL")
-        if "name" in existing_cols:
+        if "name" in voter_cols:
             cursor.execute("UPDATE voters SET full_name = name WHERE full_name IS NULL")
-
-    if "photo_path" not in existing_cols:
+    if "date_of_birth" not in voter_cols:
+        cursor.execute("ALTER TABLE voters ADD COLUMN date_of_birth DATE NULL")
+    if "image_path" not in voter_cols:
+        cursor.execute("ALTER TABLE voters ADD COLUMN image_path VARCHAR(255) NULL")
+    if "photo_path" not in voter_cols:
         cursor.execute("ALTER TABLE voters ADD COLUMN photo_path VARCHAR(255) NULL")
-
-    if "qr_token" not in existing_cols:
+    if "qr_token" not in voter_cols:
         cursor.execute("ALTER TABLE voters ADD COLUMN qr_token VARCHAR(128) NULL")
-        cursor.execute("CREATE UNIQUE INDEX idx_voters_qr_token ON voters (qr_token)")
-
-    if "is_active" not in existing_cols:
+    if "is_active" not in voter_cols:
         cursor.execute("ALTER TABLE voters ADD COLUMN is_active TINYINT DEFAULT 1")
         cursor.execute("UPDATE voters SET is_active = 1 WHERE is_active IS NULL")
+    cursor.execute("ALTER TABLE voters MODIFY COLUMN password VARCHAR(255) NULL")
+    cursor.execute("UPDATE voters SET image_path = photo_path WHERE image_path IS NULL AND photo_path IS NOT NULL")
+    cursor.execute("UPDATE voters SET photo_path = image_path WHERE photo_path IS NULL AND image_path IS NOT NULL")
+    create_index_if_missing("voters", "idx_voters_qr_token", "CREATE UNIQUE INDEX idx_voters_qr_token ON voters (qr_token)")
 
-    # Add missing vote_audit blob columns for older deployments.
+    cursor.execute("SHOW COLUMNS FROM candidates")
+    candidate_cols = {row[0] for row in cursor.fetchall()}
+    if "date_of_birth" not in candidate_cols:
+        cursor.execute("ALTER TABLE candidates ADD COLUMN date_of_birth DATE NULL")
+    if "party_symbol_image" not in candidate_cols:
+        cursor.execute("ALTER TABLE candidates ADD COLUMN party_symbol_image VARCHAR(255) NULL")
+    if "created_at" not in candidate_cols:
+        cursor.execute("ALTER TABLE candidates ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+
+    cursor.execute("SHOW COLUMNS FROM election_config")
+    election_cols = {row[0] for row in cursor.fetchall()}
+    if "status" not in election_cols:
+        cursor.execute("ALTER TABLE election_config ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'running'")
+    if "reconduct_count" not in election_cols:
+        cursor.execute("ALTER TABLE election_config ADD COLUMN reconduct_count INT NOT NULL DEFAULT 0")
+    if "stopped_at" not in election_cols:
+        cursor.execute("ALTER TABLE election_config ADD COLUMN stopped_at TIMESTAMP NULL")
+    cursor.execute("UPDATE election_config SET status = 'running' WHERE status IS NULL OR status = ''")
+    cursor.execute("UPDATE election_config SET reconduct_count = 0 WHERE reconduct_count IS NULL")
+
+    cursor.execute("SHOW COLUMNS FROM candidate_nominations")
+    nomination_cols = {row[0] for row in cursor.fetchall()}
+    if "candidate_id" not in nomination_cols:
+        cursor.execute("ALTER TABLE candidate_nominations ADD COLUMN candidate_id INT NULL AFTER id")
+    if "election_id" not in nomination_cols:
+        cursor.execute(
+            f"ALTER TABLE candidate_nominations ADD COLUMN election_id VARCHAR(128) NOT NULL DEFAULT '{DEFAULT_ELECTION_ID}' AFTER candidate_id"
+        )
+    if "party_symbol_image" not in nomination_cols:
+        cursor.execute("ALTER TABLE candidate_nominations ADD COLUMN party_symbol_image VARCHAR(255) NULL")
+
+    drop_index_if_exists("candidate_nominations", "uq_candidate_fullname_dob")
+    drop_index_if_exists("candidate_nominations", "uq_candidate_party_name")
+    drop_index_if_exists("candidate_nominations", "uq_candidate_id_number")
+    create_index_if_missing(
+        "candidate_nominations",
+        "uq_candidate_per_election",
+        "CREATE UNIQUE INDEX uq_candidate_per_election ON candidate_nominations (candidate_id, election_id)",
+    )
+    create_index_if_missing(
+        "candidate_nominations",
+        "idx_candidate_nomination_lookup",
+        "CREATE INDEX idx_candidate_nomination_lookup ON candidate_nominations (election_id, full_name, date_of_birth, id_number)",
+    )
+
     cursor.execute("SHOW COLUMNS FROM vote_audit")
     audit_cols = {row[0] for row in cursor.fetchall()}
     if "pre_vote_image_blob" not in audit_cols:
@@ -185,6 +425,21 @@ def ensure_schema():
         cursor.execute("ALTER TABLE vote_audit ADD COLUMN pre_vote_image_mime VARCHAR(64) NULL")
     if "on_vote_day_image_mime" not in audit_cols:
         cursor.execute("ALTER TABLE vote_audit ADD COLUMN on_vote_day_image_mime VARCHAR(64) NULL")
+
+    cursor.execute("SELECT COUNT(*) FROM voters WHERE role = 'admin' AND is_active = 1")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute(
+            """
+            INSERT INTO voters (voter_id, password, role, full_name, is_active)
+            VALUES (%s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                password = VALUES(password),
+                role = VALUES(role),
+                full_name = VALUES(full_name),
+                is_active = VALUES(is_active)
+            """,
+            ("admin001", "admin123", "admin", "System Admin", 1),
+        )
 
     cnx.commit()
 
@@ -207,18 +462,8 @@ def decode_image_bytes_from_data_url(data_url: str):
 def save_image_from_data_url(data_url: str, prefix: str) -> str:
     if not data_url:
         return None
-    if "," not in data_url:
-        raise HTTPException(status_code=400, detail="Invalid image payload")
-    header, encoded = data_url.split(",", 1)
-    ext = "jpg"
-    if "png" in header:
-        ext = "png"
-    filename = f"{prefix}_{uuid.uuid4().hex}.{ext}"
-    rel_path = os.path.join("media", filename)
-    abs_path = os.path.join(os.path.dirname(__file__), rel_path)
-    with open(abs_path, "wb") as f:
-        f.write(base64.b64decode(encoded))
-    return rel_path.replace("\\", "/")
+    image_bytes, mime = decode_image_bytes_from_data_url(data_url)
+    return save_image_bytes(image_bytes, mime, prefix)
 
 
 def refresh_vote_rankings():
@@ -288,34 +533,37 @@ async def get_role(voter_id, password):
 @app.post("/admin/voters")
 async def add_voter(request: Request):
     payload = await request.json()
-    voter_id = (payload.get("voter_id") or "").strip()
-    password = (payload.get("password") or "").strip()
     full_name = (payload.get("full_name") or "").strip()
-    role = (payload.get("role") or "user").strip().lower()
+    dob_raw = (payload.get("date_of_birth") or "").strip()
     photo_data = payload.get("photo_data")
 
-    if not voter_id or not password or not full_name:
-        raise HTTPException(status_code=400, detail="voter_id, password, full_name are required")
-    if role not in ("user", "admin"):
-        role = "user"
+    if not full_name or not dob_raw:
+        raise HTTPException(status_code=400, detail="full_name and date_of_birth are required")
+    if not photo_data:
+        raise HTTPException(status_code=400, detail="photo_data is required")
 
+    date_of_birth = parse_iso_date(dob_raw)
+    ensure_minimum_age(date_of_birth, "Voter")
+    photo_bytes, photo_mime = decode_image_bytes_from_data_url(photo_data)
+
+    duplicate_match = find_existing_voter_duplicate(full_name, date_of_birth, photo_bytes)
+    if duplicate_match:
+        raise HTTPException(status_code=409, detail="Person already exists in voter database")
+
+    voter_id = generate_unique_voter_id()
+    image_path = save_image_bytes(photo_bytes, photo_mime, f"voter_{voter_id}")
     qr_token = f"VOTER::{voter_id}::{uuid.uuid4().hex[:10]}"
-    photo_path = save_image_from_data_url(photo_data, f"voter_{voter_id}") if photo_data else None
 
     try:
         cursor.execute(
             """
-            INSERT INTO voters (voter_id, password, role, full_name, photo_path, qr_token, is_active)
-            VALUES (%s, %s, %s, %s, %s, %s, 1)
-            ON DUPLICATE KEY UPDATE
-                password = VALUES(password),
-                role = VALUES(role),
-                full_name = VALUES(full_name),
-                photo_path = VALUES(photo_path),
-                qr_token = VALUES(qr_token),
-                is_active = 1
+            INSERT INTO voters (
+                voter_id, password, role, full_name, date_of_birth,
+                image_path, photo_path, qr_token, is_active
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 1)
             """,
-            (voter_id, password, role, full_name, photo_path, qr_token),
+            (voter_id, None, "user", full_name, date_of_birth, image_path, image_path, qr_token),
         )
         cnx.commit()
     except mysql.connector.Error as err:
@@ -326,17 +574,20 @@ async def add_voter(request: Request):
         "message": "Voter saved",
         "voter_id": voter_id,
         "full_name": full_name,
-        "role": role,
+        "date_of_birth": str(date_of_birth),
+        "role": "user",
         "qr_token": qr_token,
-        "photo_path": photo_path,
+        "image_path": image_path,
+        "photo_path": image_path,
     }
 
 
 @app.get("/voter/by-qr")
 async def get_voter_by_qr(qr_token: str):
+    ensure_election_running()
     cursor.execute(
         """
-        SELECT voter_id, full_name, role, photo_path, qr_token
+        SELECT voter_id, full_name, role, COALESCE(image_path, photo_path), qr_token, date_of_birth
         FROM voters
         WHERE qr_token = %s AND is_active = 1
         """,
@@ -351,7 +602,9 @@ async def get_voter_by_qr(qr_token: str):
         "full_name": row[1],
         "role": row[2],
         "photo_path": row[3],
+        "image_path": row[3],
         "qr_token": row[4],
+        "date_of_birth": str(row[5]) if row[5] else None,
     }
 
 
@@ -359,7 +612,14 @@ async def get_voter_by_qr(qr_token: str):
 async def list_candidates():
     cursor.execute(
         """
-        SELECT c.candidate_id, c.name, c.party, COALESCE(r.vote_count, 0) AS vote_count
+        SELECT
+            c.candidate_id,
+            c.name,
+            c.party,
+            c.symbol,
+            COALESCE(r.vote_count, 0) AS vote_count,
+            c.party_symbol_image,
+            c.date_of_birth
         FROM candidates c
         LEFT JOIN vote_report_live r ON r.candidate_id = c.candidate_id
         ORDER BY c.candidate_id ASC
@@ -372,7 +632,10 @@ async def list_candidates():
                 "candidate_id": int(row[0]),
                 "name": row[1],
                 "party": row[2],
-                "vote_count": int(row[3]),
+                "symbol": row[3],
+                "vote_count": int(row[4]),
+                "party_symbol_image": row[5],
+                "date_of_birth": str(row[6]) if row[6] else None,
             }
         )
     return {"items": items}
@@ -385,6 +648,8 @@ async def upsert_candidate(request: Request):
     name = (payload.get("name") or "").strip()
     party = (payload.get("party") or "").strip()
     symbol = (payload.get("symbol") or "").strip()
+    dob_raw = (payload.get("date_of_birth") or "").strip()
+    party_symbol_image = (payload.get("party_symbol_image") or "").strip()
 
     if not candidate_id or not name or not party:
         raise HTTPException(status_code=400, detail="candidate_id, name, party are required")
@@ -393,24 +658,36 @@ async def upsert_candidate(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="candidate_id must be an integer")
 
+    candidate_dob = parse_iso_date(dob_raw) if dob_raw else None
+
     try:
         cursor.execute(
             """
-            INSERT INTO candidates (candidate_id, name, party, symbol, votes)
-            VALUES (%s, %s, %s, %s, 0)
+            INSERT INTO candidates (candidate_id, name, party, symbol, date_of_birth, party_symbol_image, votes)
+            VALUES (%s, %s, %s, %s, %s, %s, 0)
             ON DUPLICATE KEY UPDATE
                 name = VALUES(name),
                 party = VALUES(party),
-                symbol = VALUES(symbol)
+                symbol = VALUES(symbol),
+                date_of_birth = VALUES(date_of_birth),
+                party_symbol_image = VALUES(party_symbol_image)
             """,
-            (candidate_id, name, party, symbol),
+            (candidate_id, name, party, symbol, candidate_dob, party_symbol_image or None),
         )
         cnx.commit()
     except mysql.connector.Error as err:
         print(err)
         raise HTTPException(status_code=500, detail="Failed to save candidate")
 
-    return {"message": "Candidate saved", "candidate_id": candidate_id, "name": name, "party": party}
+    return {
+        "message": "Candidate saved",
+        "candidate_id": candidate_id,
+        "name": name,
+        "party": party,
+        "symbol": symbol or None,
+        "party_symbol_image": party_symbol_image or None,
+        "date_of_birth": str(candidate_dob) if candidate_dob else None,
+    }
 
 
 @app.get("/admin/candidate-nominations/keys")
@@ -418,7 +695,7 @@ async def list_candidate_nomination_keys():
     # Minimal fields for fast, client-side duplicate prechecks.
     cursor.execute(
         """
-        SELECT full_name, date_of_birth, party_name
+        SELECT candidate_id, election_id, full_name, date_of_birth, contact_number, id_number, party_name
         FROM candidate_nominations
         ORDER BY id DESC
         """
@@ -427,9 +704,13 @@ async def list_candidate_nomination_keys():
     for row in cursor.fetchall():
         items.append(
             {
-                "full_name": row[0],
-                "date_of_birth": str(row[1]),
-                "party_name": row[2],
+                "candidate_id": row[0],
+                "election_id": row[1],
+                "full_name": row[2],
+                "date_of_birth": str(row[3]),
+                "contact_number": row[4],
+                "id_number": row[5],
+                "party_name": row[6],
             }
         )
     return {"items": items}
@@ -438,22 +719,18 @@ async def list_candidate_nomination_keys():
 @app.post("/admin/candidate-nominations/check")
 async def check_candidate_nomination(request: Request):
     payload = await request.json()
+    election_id = derive_election_id(payload)
     full_name = (payload.get("full_name") or "").strip()
     dob_raw = (payload.get("date_of_birth") or "").strip()
     id_number = (payload.get("id_number") or "").strip()
+    contact_number = (payload.get("contact_number") or "").strip()
     party_name = (payload.get("party_name") or "").strip()
     is_independent = bool(payload.get("is_independent"))
 
     if not full_name or not dob_raw or not id_number:
         raise HTTPException(status_code=400, detail="full_name, date_of_birth, id_number are required")
-
-    try:
-        dob = datetime.date.fromisoformat(dob_raw)
-    except Exception:
-        raise HTTPException(status_code=400, detail="date_of_birth must be YYYY-MM-DD")
-
-    if dob >= datetime.date.today():
-        raise HTTPException(status_code=400, detail="date_of_birth must be in the past")
+    dob = parse_iso_date(dob_raw)
+    ensure_minimum_age(dob, "Candidate")
 
     if is_independent:
         party_name = ""
@@ -461,29 +738,24 @@ async def check_candidate_nomination(request: Request):
         if not party_name:
             raise HTTPException(status_code=400, detail="party_name is required unless is_independent is true")
 
-    cursor.execute(
-        "SELECT id FROM candidate_nominations WHERE full_name = %s AND date_of_birth = %s LIMIT 1",
-        (full_name, dob),
-    )
-    if cursor.fetchone():
-        raise HTTPException(status_code=409, detail="Duplicate detected: Full Name + Date of Birth already exists")
+    if contact_number and not contact_number.isdigit():
+        raise HTTPException(status_code=400, detail="contact_number must be numeric")
 
-    if party_name:
-        cursor.execute("SELECT id FROM candidate_nominations WHERE party_name = %s LIMIT 1", (party_name,))
-        if cursor.fetchone():
-            raise HTTPException(status_code=409, detail="Duplicate detected: Party Name already exists")
+    if candidate_exists_in_database(full_name, dob, contact_number, id_number):
+        raise HTTPException(status_code=409, detail="Candidate already exists in database")
 
-    cursor.execute("SELECT id FROM candidate_nominations WHERE id_number = %s LIMIT 1", (id_number,))
-    if cursor.fetchone():
-        raise HTTPException(status_code=409, detail="Duplicate detected: ID Number already exists")
+    if candidate_exists_for_election(election_id, full_name, dob, id_number):
+        raise HTTPException(status_code=409, detail="Candidate is already registered for this election")
 
-    return {"ok": True}
+    return {"ok": True, "election_id": election_id}
 
 
 @app.post("/admin/candidate-nominations")
 async def create_candidate_nomination(request: Request):
     payload = await request.json()
 
+    candidate_id = payload.get("candidate_id")
+    election_id = derive_election_id(payload)
     election_name = (payload.get("election_name") or "").strip()
     position = (payload.get("position") or "").strip()
     full_name = (payload.get("full_name") or "").strip()
@@ -493,18 +765,15 @@ async def create_candidate_nomination(request: Request):
     id_number = (payload.get("id_number") or "").strip()
     party_name = (payload.get("party_name") or "").strip()
     party_symbol = (payload.get("party_symbol") or "").strip()
+    party_symbol_image_data = payload.get("party_symbol_image_data")
+    party_symbol_image_path = (payload.get("party_symbol_image") or "").strip()
     is_independent = bool(payload.get("is_independent"))
 
     if not full_name or not dob_raw or not id_number:
         raise HTTPException(status_code=400, detail="full_name, date_of_birth, id_number are required")
 
-    try:
-        dob = datetime.date.fromisoformat(dob_raw)
-    except Exception:
-        raise HTTPException(status_code=400, detail="date_of_birth must be YYYY-MM-DD")
-
-    if dob >= datetime.date.today():
-        raise HTTPException(status_code=400, detail="date_of_birth must be in the past")
+    dob = parse_iso_date(dob_raw)
+    ensure_minimum_age(dob, "Candidate")
 
     if contact_number and not contact_number.isdigit():
         raise HTTPException(status_code=400, detail="contact_number must be numeric")
@@ -512,39 +781,46 @@ async def create_candidate_nomination(request: Request):
     if is_independent:
         party_name = None
         party_symbol = None
+        party_symbol_image_path = None
     else:
         if not party_name:
             raise HTTPException(status_code=400, detail="party_name is required unless is_independent is true")
         if party_symbol == "":
             party_symbol = None
+        if party_symbol_image_data:
+            party_symbol_image_path = save_image_from_data_url(
+                party_symbol_image_data,
+                f"party_symbol_{slugify(party_name)}",
+            )
 
-    # Friendly duplicate checks (DB unique constraints still enforce truth).
-    cursor.execute(
-        "SELECT id FROM candidate_nominations WHERE full_name = %s AND date_of_birth = %s LIMIT 1",
-        (full_name, dob),
-    )
-    if cursor.fetchone():
-        raise HTTPException(status_code=409, detail="Duplicate detected: Full Name + Date of Birth already exists")
+    if candidate_exists_in_database(full_name, dob, contact_number, id_number):
+        raise HTTPException(status_code=409, detail="Candidate already exists in database")
+    if candidate_exists_for_election(election_id, full_name, dob, id_number):
+        raise HTTPException(status_code=409, detail="Candidate is already registered for this election")
+    if candidate_id_exists_for_election(candidate_id, election_id):
+        raise HTTPException(status_code=409, detail="Candidate is already registered for this election")
 
-    if party_name:
-        cursor.execute("SELECT id FROM candidate_nominations WHERE party_name = %s LIMIT 1", (party_name,))
-        if cursor.fetchone():
-            raise HTTPException(status_code=409, detail="Duplicate detected: Party Name already exists")
-
-    cursor.execute("SELECT id FROM candidate_nominations WHERE id_number = %s LIMIT 1", (id_number,))
-    if cursor.fetchone():
-        raise HTTPException(status_code=409, detail="Duplicate detected: ID Number already exists")
+    if candidate_id not in (None, ""):
+        try:
+            candidate_id = int(candidate_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="candidate_id must be an integer")
+    else:
+        candidate_id = None
 
     try:
         cursor.execute(
             """
             INSERT INTO candidate_nominations (
-                election_name, position, full_name, date_of_birth, address, contact_number,
-                id_number, party_name, party_symbol, is_independent
+                candidate_id, election_id, election_name, position, full_name, date_of_birth,
+                address, contact_number, id_number, party_name, party_symbol,
+                party_symbol_image, is_independent
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
+                candidate_id,
+                election_id,
                 election_name or None,
                 position or None,
                 full_name,
@@ -554,6 +830,7 @@ async def create_candidate_nomination(request: Request):
                 id_number,
                 party_name,
                 party_symbol or None,
+                party_symbol_image_path or None,
                 1 if is_independent else 0,
             ),
         )
@@ -561,20 +838,21 @@ async def create_candidate_nomination(request: Request):
     except mysql.connector.Error as err:
         # 1062: duplicate key
         if getattr(err, "errno", None) == 1062:
-            raise HTTPException(status_code=409, detail="Duplicate detected: nomination already exists")
+            raise HTTPException(status_code=409, detail="Candidate is already registered for this election")
         print(err)
         raise HTTPException(status_code=500, detail="Failed to save candidate nomination")
 
-    return {"message": "Candidate nomination created"}
+    return {
+        "message": "Candidate nomination created",
+        "candidate_id": candidate_id,
+        "election_id": election_id,
+        "party_symbol_image": party_symbol_image_path or None,
+    }
 
 
 @app.get("/election/dates")
 async def get_election_dates():
-    cursor.execute("SELECT start_ts, end_ts, updated_at FROM election_config WHERE id = 1")
-    row = cursor.fetchone()
-    if not row:
-        return {"start_ts": 0, "end_ts": 0}
-    return {"start_ts": int(row[0] or 0), "end_ts": int(row[1] or 0), "updated_at": str(row[2])}
+    return get_election_state()
 
 
 @app.post("/admin/election/dates")
@@ -590,12 +868,86 @@ async def set_election_dates(request: Request):
     if end_ts <= start_ts:
         raise HTTPException(status_code=400, detail="end_ts must be greater than start_ts")
 
-    cursor.execute("UPDATE election_config SET start_ts = %s, end_ts = %s WHERE id = 1", (start_ts, end_ts))
+    cursor.execute(
+        """
+        UPDATE election_config
+        SET start_ts = %s, end_ts = %s, status = 'running', stopped_at = NULL
+        WHERE id = 1
+        """,
+        (start_ts, end_ts),
+    )
     cnx.commit()
-    return {"message": "Election dates saved", "start_ts": start_ts, "end_ts": end_ts}
+    return {"message": "Election dates saved", "start_ts": start_ts, "end_ts": end_ts, "status": "running"}
+
+
+@app.post("/admin/election/stop")
+async def emergency_stop_election():
+    cursor.execute(
+        """
+        UPDATE election_config
+        SET status = 'stopped', stopped_at = CURRENT_TIMESTAMP
+        WHERE id = 1
+        """
+    )
+    cnx.commit()
+    state = get_election_state()
+    return {"message": "Election stopped successfully", **state}
+
+
+@app.post("/admin/election/restart")
+async def restart_election(request: Request):
+    payload = await request.json()
+    reset_results = bool(payload.get("reset_results"))
+    start_ts = payload.get("start_ts")
+    end_ts = payload.get("end_ts")
+
+    if reset_results:
+        cursor.execute("TRUNCATE TABLE vote_audit")
+        cursor.execute("TRUNCATE TABLE vote_report_live")
+
+    if start_ts is not None and end_ts is not None:
+        try:
+            start_ts = int(start_ts)
+            end_ts = int(end_ts)
+        except Exception:
+            raise HTTPException(status_code=400, detail="start_ts and end_ts must be integers (unix seconds)")
+        if end_ts <= start_ts:
+            raise HTTPException(status_code=400, detail="end_ts must be greater than start_ts")
+        cursor.execute(
+            """
+            UPDATE election_config
+            SET start_ts = %s,
+                end_ts = %s,
+                status = 'running',
+                stopped_at = NULL,
+                reconduct_count = reconduct_count + 1
+            WHERE id = 1
+            """,
+            (start_ts, end_ts),
+        )
+    else:
+        cursor.execute(
+            """
+            UPDATE election_config
+            SET status = 'running',
+                stopped_at = NULL,
+                reconduct_count = reconduct_count + 1
+            WHERE id = 1
+            """
+        )
+
+    cnx.commit()
+    state = get_election_state()
+    return {
+        "message": "Election restarted successfully",
+        "note": "Blockchain vote state is unchanged. Redeploy the smart contract if you need a fully fresh on-chain election.",
+        "reset_results": reset_results,
+        **state,
+    }
 
 @app.post("/voter/confirm-scan")
 async def confirm_scan(request: Request):
+    ensure_election_running()
     payload = await request.json()
     qr_token = (payload.get("qr_token") or "").strip()
     image_data = payload.get("image_data")
@@ -603,14 +955,18 @@ async def confirm_scan(request: Request):
         raise HTTPException(status_code=400, detail="qr_token and image_data are required")
 
     cursor.execute(
-        "SELECT voter_id, full_name, role, photo_path FROM voters WHERE qr_token = %s AND is_active = 1",
+        """
+        SELECT voter_id, full_name, role, COALESCE(image_path, photo_path), date_of_birth
+        FROM voters
+        WHERE qr_token = %s AND is_active = 1
+        """,
         (qr_token,),
     )
     row = cursor.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Voter not found for this QR")
 
-    voter_id, full_name, role, photo_path = row
+    voter_id, full_name, role, image_path, date_of_birth = row
     on_vote_day_path = save_image_from_data_url(image_data, f"scan_{voter_id}")
 
     return {
@@ -618,7 +974,9 @@ async def confirm_scan(request: Request):
         "voter_id": voter_id,
         "full_name": full_name,
         "role": role,
-        "photo_path": photo_path,
+        "photo_path": image_path,
+        "image_path": image_path,
+        "date_of_birth": str(date_of_birth) if date_of_birth else None,
         "on_vote_day_image_path": on_vote_day_path,
         "confirmed_at": datetime.datetime.utcnow().isoformat() + "Z",
     }
@@ -626,6 +984,7 @@ async def confirm_scan(request: Request):
 
 @app.post("/vote/audit")
 async def save_vote_audit(request: Request):
+    ensure_election_running()
     try:
         payload = await request.json()
     except Exception:
@@ -867,6 +1226,13 @@ async def clear_database(request: Request):
                 VALUES (%s, %s, %s, %s, %s)
                 """,
                 ("admin001", "admin123", "admin", "System Admin", 1),
+            )
+        if "election_config" in cleared_tables:
+            cursor.execute(
+                """
+                INSERT INTO election_config (id, start_ts, end_ts, status, reconduct_count, stopped_at)
+                VALUES (1, 0, 0, 'running', 0, NULL)
+                """
             )
 
         # Remove captured media files from local storage.

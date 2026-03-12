@@ -1,6 +1,28 @@
 import { API_BASE, FRONTEND_BASE } from './config.js';
 import { byId, fetchJson, setStatus, downloadUrlAsFile } from './utils.js';
 
+const MINIMUM_AGE_YEARS = 18;
+
+function calculateAgeFromIso(isoDate) {
+  if (!isoDate) return 0;
+  const dob = new Date(`${isoDate}T00:00:00`);
+  const today = new Date();
+  let age = today.getFullYear() - dob.getFullYear();
+  const monthDelta = today.getMonth() - dob.getMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < dob.getDate())) {
+    age -= 1;
+  }
+  return age;
+}
+
+function todayIso() {
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0');
+  const dd = String(today.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 class AdminTools {
   constructor() {
     this.stream = null;
@@ -8,6 +30,7 @@ class AdminTools {
     this.reportTimer = null;
     this.qrImageDataUrl = null;
     this.nominationBound = false;
+    this.electionStateTimer = null;
     this.init();
   }
 
@@ -35,12 +58,17 @@ class AdminTools {
   init() {
     byId('startAdminCam')?.addEventListener('click', () => this.startCamera());
     byId('captureAdminPhoto')?.addEventListener('click', () => this.capturePhoto());
+    byId('regPhotoUpload')?.addEventListener('change', (event) => this.handlePhotoUpload(event));
     byId('registerVoterBtn')?.addEventListener('click', () => this.registerVoter());
     byId('saveQrBtn')?.addEventListener('click', () => this.saveGeneratedQr());
     byId('downloadVoteAuditBtn')?.addEventListener('click', () => this.downloadVoteAuditReport());
     byId('clearDatabaseBtn')?.addEventListener('click', () => this.clearDatabaseData());
+    byId('emergencyStopBtn')?.addEventListener('click', () => this.emergencyStopElection());
+    byId('restartElectionBtn')?.addEventListener('click', () => this.restartElection());
     this.initNominationFrame();
     this.startLiveReport();
+    this.refreshElectionState();
+    this.startElectionStatePolling();
   }
 
   async startCamera() {
@@ -62,31 +90,55 @@ class AdminTools {
     setStatus(byId('registerMsg'), 'Photo captured.');
   }
 
+  async handlePhotoUpload(event) {
+    const file = event?.target?.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      this.photoData = String(reader.result || '');
+      if (byId('cardPhoto')) byId('cardPhoto').src = this.photoData;
+      setStatus(byId('registerMsg'), 'Photo uploaded successfully.');
+    };
+    reader.onerror = () => {
+      setStatus(byId('registerMsg'), 'Photo upload failed.', { isError: true });
+    };
+    reader.readAsDataURL(file);
+  }
+
   async registerVoter() {
     const payload = {
-      voter_id: byId('regVoterId')?.value?.trim(),
       full_name: byId('regFullName')?.value?.trim(),
-      password: byId('regPassword')?.value?.trim(),
-      role: byId('regRole')?.value || 'user',
+      date_of_birth: byId('regDateOfBirth')?.value?.trim(),
       photo_data: this.photoData,
     };
 
-    if (!payload.voter_id || !payload.full_name || !payload.password) {
-      setStatus(byId('registerMsg'), 'Voter ID, full name, password are required.', { isError: true });
+    if (!payload.full_name || !payload.date_of_birth) {
+      setStatus(byId('registerMsg'), 'Full name and date of birth are required.', { isError: true });
+      return;
+    }
+    const dateOfBirth = new Date(`${payload.date_of_birth}T00:00:00`);
+    if (Number.isNaN(dateOfBirth.getTime()) || payload.date_of_birth >= todayIso()) {
+      setStatus(byId('registerMsg'), 'Date of birth must be a valid past date.', { isError: true });
+      return;
+    }
+    if (calculateAgeFromIso(payload.date_of_birth) < MINIMUM_AGE_YEARS) {
+      setStatus(byId('registerMsg'), `Voter must be at least ${MINIMUM_AGE_YEARS} years old.`, { isError: true });
       return;
     }
     if (!payload.photo_data) {
-      setStatus(byId('registerMsg'), 'Capture photo first.', { isError: true });
+      setStatus(byId('registerMsg'), 'Upload or capture a voter photo first.', { isError: true });
       return;
     }
 
     try {
+      byId('regGeneratedVoterId').value = '';
       setStatus(byId('registerMsg'), 'Saving voter...', { isBusy: true });
       const data = await fetchJson(`${API_BASE}/admin/voters`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+      byId('regGeneratedVoterId').value = data.voter_id || '';
       this.renderCard(data, payload.photo_data);
       setStatus(byId('registerMsg'), `Voter saved: ${data.voter_id}`, { isBusy: false });
     } catch (e) {
@@ -98,7 +150,7 @@ class AdminTools {
     byId('voterCard').style.display = 'block';
     byId('cardName').textContent = data.full_name || '';
     byId('cardVoterId').textContent = data.voter_id || '';
-    byId('cardRole').textContent = (data.role || 'user').toUpperCase();
+    byId('cardDob').textContent = data.date_of_birth || '';
     byId('cardPhoto').src = photoData;
     byId('cardQrToken').textContent = data.qr_token || '';
 
@@ -126,6 +178,37 @@ class AdminTools {
         this.qrImageDataUrl = qrImg.src;
       }
     }, 80);
+  }
+
+  async emergencyStopElection() {
+    const ok = window.confirm('This will immediately stop election activity and disable voting endpoints. Continue?');
+    if (!ok) return;
+    try {
+      setStatus(byId('electionControlMsg'), 'Stopping election...', { isBusy: true });
+      const data = await fetchJson(`${API_BASE}/admin/election/stop`, { method: 'POST' });
+      this.renderElectionState(data);
+      setStatus(byId('electionControlMsg'), `Election status: ${data.status}`, { isBusy: false });
+    } catch (e) {
+      setStatus(byId('electionControlMsg'), `Emergency stop failed: ${e.message}`, { isError: true, isBusy: false });
+    }
+  }
+
+  async restartElection() {
+    const resetResults = window.confirm(
+      'Click OK to restart and clear backend vote audit/report data for a reconduct election.\nClick Cancel to reopen without clearing stored backend vote data.'
+    );
+    try {
+      setStatus(byId('electionControlMsg'), 'Restarting election...', { isBusy: true });
+      const data = await fetchJson(`${API_BASE}/admin/election/restart`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reset_results: resetResults }),
+      });
+      this.renderElectionState(data);
+      setStatus(byId('electionControlMsg'), `Election status: ${data.status}. ${data.note || ''}`, { isBusy: false });
+    } catch (e) {
+      setStatus(byId('electionControlMsg'), `Restart failed: ${e.message}`, { isError: true, isBusy: false });
+    }
   }
 
   saveGeneratedQr() {
@@ -175,10 +258,46 @@ class AdminTools {
         body: JSON.stringify({ confirm_key: 'CLEAR_ALL' }),
       });
       setStatus(byId('liveReportMsg'), `Cleared: ${data.cleared_tables?.join(', ') || 'done'}`, { isBusy: false });
+      this.refreshElectionState();
       // Reset UI fragments
       byId('liveReportBody').innerHTML = '';
     } catch (e) {
       setStatus(byId('liveReportMsg'), `Clear error: ${e.message}`, { isError: true, isBusy: false });
+    }
+  }
+
+  startElectionStatePolling() {
+    if (this.electionStateTimer) clearInterval(this.electionStateTimer);
+    this.electionStateTimer = setInterval(() => this.refreshElectionState(), 5000);
+  }
+
+  renderElectionState(state) {
+    const node = byId('electionStateSummary');
+    if (!node) return;
+
+    const startText = state?.start_ts ? new Date(Number(state.start_ts) * 1000).toLocaleString() : 'Not set';
+    const endText = state?.end_ts ? new Date(Number(state.end_ts) * 1000).toLocaleString() : 'Not set';
+    const status = String(state?.status || 'running');
+    const reconductCount = Number(state?.reconduct_count || 0);
+
+    node.dataset.state = status;
+    node.innerHTML = `
+      <strong>Status:</strong> ${status.toUpperCase()}
+      <span>Start: ${startText}</span>
+      <span>End: ${endText}</span>
+      <span>Reconducts: ${reconductCount}</span>
+    `;
+  }
+
+  async refreshElectionState() {
+    try {
+      const data = await fetchJson(`${API_BASE}/election/dates`);
+      this.renderElectionState(data);
+    } catch (e) {
+      const node = byId('electionStateSummary');
+      if (!node) return;
+      node.dataset.state = 'unknown';
+      node.textContent = `Unable to load election state: ${e.message}`;
     }
   }
 
@@ -262,7 +381,6 @@ class AdminTools {
     const payload = msg.payload || {};
     const name = String(payload.name || '').trim();
     const party = String(payload.party || '').trim();
-    const symbol = String(payload.symbol || '').trim();
 
     const reply = (out) => {
       try {
@@ -306,12 +424,6 @@ class AdminTools {
       const newIdRaw = await window.App.readCountCandidates();
       const candidate_id = Number(newIdRaw);
       if (!candidate_id) throw new Error('Could not read candidate id after transaction.');
-
-      await fetchJson(`${API_BASE}/admin/candidates`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidate_id, name, party, symbol }),
-      });
 
       // Refresh admin-side candidate list (best effort).
       try {

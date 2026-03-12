@@ -89,6 +89,18 @@ app.get('/vote.html', (req, res) => {
   res.sendFile(path.join(__dirname, 'src/html/vote.html'));
 });
 
+app.get('/verify-vote.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'src/html/verify_vote.html'));
+});
+
+app.get('/verify_vote.html', (req, res) => {
+  res.redirect(302, '/verify-vote.html');
+});
+
+app.get('/explorer.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'src/html/explorer.html'));
+});
+
 app.get('/loading.html', (req, res) => {
   res.sendFile(path.join(__dirname, 'src/html/loading.html'));
 });

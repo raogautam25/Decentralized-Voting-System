@@ -132,6 +132,7 @@ class LoadingManager {
         block_number: blockNumber,
         vote_submitted_time: voteSubmittedTime,
         voter_id: audit?.voter_id || '',
+        candidate_id: audit?.candidate_id || '',
         candidate_name: audit?.candidate_name || '',
         party: audit?.party || '',
       };

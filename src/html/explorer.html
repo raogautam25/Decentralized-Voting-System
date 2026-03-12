@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Vote Explorer</title>
+    <link rel="stylesheet" type="text/css" href="../css/public_verifier.css">
+  </head>
+  <body>
+    <div class="page-wrap">
+      <div class="title">
+        <h1>Decentralized Voting Using Ethereum Blockchain</h1>
+        <h2>Blockchain Explorer</h2>
+      </div>
+
+      <nav class="top-nav" aria-label="Main Navigation">
+        <a href="./login.html">Home</a>
+        <a href="./vote.html">Vote</a>
+        <a href="./explorer.html#resultsSection">Results</a>
+        <a href="./verify-vote.html">Verify Vote</a>
+        <a href="./explorer.html" class="active">Explorer</a>
+      </nav>
+
+      <section id="resultsSection" class="panel">
+        <h3>Current Results (On-Chain)</h3>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Candidate</th>
+                <th>Party</th>
+                <th>Votes</th>
+              </tr>
+            </thead>
+            <tbody id="resultsBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>Vote Events</h3>
+        <button id="refreshExplorerBtn" type="button" class="btn btn-primary">Refresh Explorer</button>
+        <p id="explorerMsg" class="status"></p>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Tx Hash</th>
+                <th>Candidate</th>
+                <th>Block</th>
+                <th>Wallet</th>
+              </tr>
+            </thead>
+            <tbody id="eventsBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.0/umd/popper.min.js"></script>
+    <script src="../dist/app.bundle.js?v=20260313b" type="module"></script>
+    <script src="../js/explorer.js?v=20260312a" type="module"></script>
+  </body>
+</html>

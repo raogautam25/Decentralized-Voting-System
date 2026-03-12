@@ -12,6 +12,8 @@ window.App = {
   provider: null,
   account: null,
   voting: null,
+  initPromise: null,
+  providerListenersBound: false,
 
   // ---- bootstrapping ----
   initProvider: async function () {
@@ -60,21 +62,27 @@ window.App = {
         console.warn('Network check error:', e);
       }
 
-      // Request accounts up front
-      const accounts = await this.provider.request({ method: 'eth_requestAccounts' });
+      // Reuse already-approved accounts when possible to avoid duplicate MetaMask prompts.
+      let accounts = await this.provider.request({ method: 'eth_accounts' });
+      if (!accounts || accounts.length === 0) {
+        accounts = await this.provider.request({ method: 'eth_requestAccounts' });
+      }
       this.account = accounts && accounts[0] ? accounts[0] : null;
 
       // React to changes
-      this.provider.on?.('accountsChanged', (accs) => {
-        this.account = accs && accs[0] ? accs[0] : null;
-        $('#accountAddress').text(this.account ? `Your Account: ${this.account}` : 'No account connected');
-        // UI state may change with a new account
-        this.updateVoteButtonState().catch(console.warn);
-      });
-      this.provider.on?.('chainChanged', () => {
-        // full reload keeps things consistent with the new chain
-        window.location.reload();
-      });
+      if (!this.providerListenersBound) {
+        this.provider.on?.('accountsChanged', (accs) => {
+          this.account = accs && accs[0] ? accs[0] : null;
+          $('#accountAddress').text(this.account ? `Your Account: ${this.account}` : 'No account connected');
+          // UI state may change with a new account
+          this.updateVoteButtonState().catch(console.warn);
+        });
+        this.provider.on?.('chainChanged', () => {
+          // full reload keeps things consistent with the new chain
+          window.location.reload();
+        });
+        this.providerListenersBound = true;
+      }
     } else {
       // Fallback to local RPC (development only)
       console.warn('No EIP-1193 provider found; falling back to http://127.0.0.1:7545');
@@ -96,10 +104,18 @@ window.App = {
 
   // ---- lifecycle entrypoint ----
   eventStart: async function () {
-    try {
-      await this.initProvider();
+    if (this.initPromise) {
+      return this.initPromise;
+    }
+    if (this.web3 && this.voting && this.getVotingAddress()) {
+      return this.voting;
+    }
 
-      $('#accountAddress').text(this.account ? `Your Account: ${this.account}` : 'No account connected');
+    this.initPromise = (async () => {
+      try {
+        await this.initProvider();
+
+        $('#accountAddress').text(this.account ? `Your Account: ${this.account}` : 'No account connected');
 
       // Load contract instance
       try {
@@ -131,13 +147,13 @@ window.App = {
         }
       }
 
-      // Initial UI render
-      await this.renderDates();
-      await this.loadCandidates();
-      await this.updateVoteButtonState();
+        // Initial UI render
+        await this.renderDates();
+        await this.loadCandidates();
+        await this.updateVoteButtonState();
 
-      // Wire UI events once DOM is ready
-      $(document).ready(() => {
+        // Wire UI events once DOM is ready
+        $(document).ready(() => {
         // Add candidate
         $('#addCandidate').off('click').on('click', async () => {
           const nameCandidate = $('#name').val()?.trim();
@@ -207,11 +223,19 @@ window.App = {
         // If your HTML uses onclick="App.vote()", this still works because we expose window.App.vote.
         // But we also wire a safety click handler in case you use an ID.
         $('#voteButton').off('click').on('click', () => this.vote());
-      });
-    } catch (err) {
-      console.error('Initialization error:', err);
-      alert(`Initialization failed: ${err?.message || err}`);
-    }
+        });
+
+        return this.voting;
+      } catch (err) {
+        console.error('Initialization error:', err);
+        alert(`Initialization failed: ${err?.message || err}`);
+        throw err;
+      } finally {
+        this.initPromise = null;
+      }
+    })();
+
+    return this.initPromise;
   },
 
   // ---- helpers / UI ----
@@ -301,6 +325,275 @@ window.App = {
       return method.send({ from: this.account, gas });
     }
     throw new Error('Contract method voteByQr is unavailable. Redeploy contract and refresh.');
+  },
+
+  getVotingAddress: function () {
+    if (!this.voting) return '';
+    if (this.voting.address) return String(this.voting.address);
+    if (this.voting.options?.address) return String(this.voting.options.address);
+    return '';
+  },
+
+  getReadonlyVotingContract: function () {
+    const address = this.getVotingAddress();
+    if (!address) {
+      throw new Error('Voting contract address is unavailable.');
+    }
+    return new this.web3.eth.Contract(votingArtifacts.abi, address);
+  },
+
+  getEventAbi: function (eventName) {
+    return (votingArtifacts.abi || []).find((item) => item.type === 'event' && item.name === eventName) || null;
+  },
+
+  normalizeUint: function (value) {
+    if (value === undefined || value === null) return '';
+    if (typeof value === 'number') return String(value);
+    if (typeof value === 'string') {
+      if (!value) return '';
+      if (value.startsWith('0x')) {
+        try {
+          return this.web3.utils.hexToNumberString(value);
+        } catch {
+          return value;
+        }
+      }
+      return value;
+    }
+    try {
+      return value.toString(10);
+    } catch {
+      return String(value);
+    }
+  },
+
+  decodeEventLog: function (log, eventName) {
+    if (!log || !Array.isArray(log.topics) || log.topics.length === 0) return null;
+    const eventAbi = this.getEventAbi(eventName);
+    if (!eventAbi) return null;
+    const signature = this.web3.eth.abi.encodeEventSignature(eventAbi);
+    if (String(log.topics[0]).toLowerCase() !== String(signature).toLowerCase()) return null;
+    try {
+      return this.web3.eth.abi.decodeLog(eventAbi.inputs, log.data, log.topics.slice(1));
+    } catch {
+      return null;
+    }
+  },
+
+  resolveCandidateMeta: async function (candidateID) {
+    const idNum = Number(candidateID);
+    if (!idNum) {
+      return { candidateId: 0, name: 'Unknown', party: 'Unknown' };
+    }
+    try {
+      const cand = await this.readCandidate(idNum);
+      return {
+        candidateId: idNum,
+        name: String(cand[1] || 'Unknown'),
+        party: String(cand[2] || 'Unknown')
+      };
+    } catch {
+      return { candidateId: idNum, name: 'Unknown', party: 'Unknown' };
+    }
+  },
+
+  verifyVoteTransaction: async function (txHash) {
+    const cleanHash = String(txHash || '').trim();
+    if (!cleanHash || !cleanHash.startsWith('0x')) {
+      throw new Error('Enter a valid transaction hash.');
+    }
+
+    if (!this.web3 || !this.voting) {
+      await this.eventStart();
+    }
+
+    const [tx, receipt] = await Promise.all([
+      this.web3.eth.getTransaction(cleanHash),
+      this.web3.eth.getTransactionReceipt(cleanHash),
+    ]);
+
+    if (!tx) {
+      return { found: false, txHash: cleanHash };
+    }
+
+    if (!receipt) {
+      return {
+        found: true,
+        pending: true,
+        txHash: cleanHash,
+        from: tx.from || '',
+        to: tx.to || '',
+      };
+    }
+
+    const logs = Array.isArray(receipt.logs) ? receipt.logs : [];
+    let parsed = null;
+    let eventName = '';
+
+    for (const log of logs) {
+      const cast = this.decodeEventLog(log, 'VoteCast');
+      if (cast) {
+        parsed = cast;
+        eventName = 'VoteCast';
+        break;
+      }
+    }
+
+    if (!parsed) {
+      for (const log of logs) {
+        const voted = this.decodeEventLog(log, 'Voted');
+        if (voted) {
+          parsed = voted;
+          eventName = 'Voted';
+          break;
+        }
+      }
+    }
+
+    if (!parsed) {
+      for (const log of logs) {
+        const votedByQr = this.decodeEventLog(log, 'VotedByQr');
+        if (votedByQr) {
+          parsed = votedByQr;
+          eventName = 'VotedByQr';
+          break;
+        }
+      }
+    }
+
+    const statusRaw = receipt.status;
+    const success = typeof statusRaw === 'boolean'
+      ? statusRaw
+      : (String(statusRaw).toLowerCase() === '0x1' || String(statusRaw) === '1');
+
+    const blockNumber = Number(receipt.blockNumber || 0);
+    const block = blockNumber > 0 ? await this.web3.eth.getBlock(blockNumber) : null;
+
+    const candidateIdRaw = parsed?.candidateId || parsed?.[1] || '';
+    const candidateId = Number(this.normalizeUint(candidateIdRaw) || 0);
+    const candidateMeta = await this.resolveCandidateMeta(candidateId);
+
+    let timestamp = Number(this.normalizeUint(parsed?.timestamp || '') || 0);
+    if (!timestamp && block?.timestamp) {
+      timestamp = Number(block.timestamp);
+    }
+
+    const voterAddress = String(
+      parsed?.voter || parsed?.operator || parsed?.[0] || tx.from || ''
+    );
+
+    const isVoteTx = Boolean(parsed);
+
+    return {
+      found: true,
+      pending: false,
+      isVoteTx,
+      eventName,
+      success,
+      txHash: cleanHash,
+      from: tx.from || '',
+      to: tx.to || '',
+      voterAddress,
+      blockNumber,
+      gasUsed: this.normalizeUint(receipt.gasUsed || ''),
+      candidateId: candidateMeta.candidateId,
+      candidateName: candidateMeta.name,
+      candidateParty: candidateMeta.party,
+      timestamp,
+      timestampIso: timestamp ? new Date(timestamp * 1000).toISOString() : '',
+    };
+  },
+
+  getPublicVoteEvents: async function ({ fromBlock = 0, toBlock = 'latest' } = {}) {
+    if (!this.web3 || !this.voting) {
+      await this.eventStart();
+    }
+
+    const contractRo = this.getReadonlyVotingContract();
+    const eventAbi = this.getEventAbi('VoteCast');
+    let events = [];
+
+    if (eventAbi) {
+      events = await contractRo.getPastEvents('VoteCast', { fromBlock, toBlock });
+    }
+
+    if (!eventAbi || events.length === 0) {
+      const [legacyVotes, legacyQrVotes] = await Promise.all([
+        contractRo.getPastEvents('Voted', { fromBlock, toBlock }),
+        contractRo.getPastEvents('VotedByQr', { fromBlock, toBlock }),
+      ]);
+      if (events.length === 0) {
+        events = [...legacyVotes, ...legacyQrVotes];
+      }
+    }
+
+    const blockTsCache = new Map();
+    const candidateCache = new Map();
+
+    const normalized = await Promise.all(events.map(async (ev) => {
+      const values = ev.returnValues || {};
+      const candidateId = Number(this.normalizeUint(values.candidateId || values[1] || '') || 0);
+      const voterAddress = String(values.voter || values.operator || values[0] || '');
+      const blockNumber = Number(ev.blockNumber || 0);
+
+      let ts = Number(this.normalizeUint(values.timestamp || '') || 0);
+      if (!ts && blockNumber > 0) {
+        if (!blockTsCache.has(blockNumber)) {
+          try {
+            const block = await this.web3.eth.getBlock(blockNumber);
+            blockTsCache.set(blockNumber, Number(block?.timestamp || 0));
+          } catch {
+            blockTsCache.set(blockNumber, 0);
+          }
+        }
+        ts = blockTsCache.get(blockNumber) || 0;
+      }
+
+      if (!candidateCache.has(candidateId)) {
+        candidateCache.set(candidateId, await this.resolveCandidateMeta(candidateId));
+      }
+      const meta = candidateCache.get(candidateId);
+
+      return {
+        txHash: ev.transactionHash || '',
+        blockNumber,
+        logIndex: Number(ev.logIndex || 0),
+        eventName: String(ev.event || ''),
+        voterAddress,
+        candidateId: Number(meta?.candidateId || candidateId || 0),
+        candidateName: String(meta?.name || 'Unknown'),
+        candidateParty: String(meta?.party || 'Unknown'),
+        timestamp: ts,
+        timestampIso: ts ? new Date(ts * 1000).toISOString() : '',
+      };
+    }));
+
+    return normalized.sort((a, b) => {
+      if (b.blockNumber !== a.blockNumber) return b.blockNumber - a.blockNumber;
+      return b.logIndex - a.logIndex;
+    });
+  },
+
+  getCandidateResults: async function () {
+    if (!this.web3 || !this.voting) {
+      await this.eventStart();
+    }
+    const count = Number(await this.readCountCandidates());
+    const out = [];
+    for (let i = 1; i <= count; i++) {
+      try {
+        const c = await this.readCandidate(i);
+        out.push({
+          candidateId: Number(c[0]),
+          name: String(c[1] || 'Unknown'),
+          party: String(c[2] || 'Unknown'),
+          voteCount: Number(c[3] || 0),
+        });
+      } catch {
+        // skip broken candidate slots
+      }
+    }
+    return out.sort((a, b) => b.voteCount - a.voteCount);
   },
 
   renderDates: async function () {

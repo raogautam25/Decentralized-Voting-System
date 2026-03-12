@@ -1,5 +1,5 @@
 import { API_BASE } from './config.js';
-import { safeJsonParse } from './utils.js';
+import { fetchJson, safeJsonParse } from './utils.js';
 
 class VoterDashboard {
   constructor() {
@@ -19,6 +19,8 @@ class VoterDashboard {
     this.activeQrToken = '';
     this.voteObserver = null;
     this.autoVerifying = false;
+    this.electionLocked = false;
+    this.electionStateTimer = null;
     this.init();
   }
 
@@ -39,6 +41,8 @@ class VoterDashboard {
     this.setupLogout();
     this.setupQrDetector();
     this.setupVoteGuard();
+    this.refreshElectionState();
+    this.startElectionStatePolling();
     this.updateActionButtons();
     this.applyVoteGuard();
   }
@@ -164,7 +168,31 @@ class VoterDashboard {
     this.jsQrAvailable = typeof window.jsQR === 'function';
   }
 
+  startElectionStatePolling() {
+    if (this.electionStateTimer) clearInterval(this.electionStateTimer);
+    this.electionStateTimer = setInterval(() => this.refreshElectionState(), 5000);
+  }
+
+  async refreshElectionState() {
+    try {
+      const state = await fetchJson(`${API_BASE}/election/dates`);
+      this.electionLocked = String(state?.status || '').toLowerCase() === 'stopped';
+      if (this.electionLocked) {
+        this.setMsg('verifyMsg', 'Election is currently stopped. QR verification is disabled.', true);
+      }
+    } catch {
+      this.electionLocked = false;
+    } finally {
+      this.updateActionButtons();
+      this.applyVoteGuard();
+    }
+  }
+
   async startQrScan() {
+    if (this.electionLocked) {
+      this.setMsg('verifyMsg', 'Election is currently stopped. QR verification is disabled.', true);
+      return;
+    }
     try {
       this.qrDetected = false;
       this.captureDone = false;
@@ -437,6 +465,10 @@ class VoterDashboard {
   }
 
   async confirmScannedVoter() {
+    if (this.electionLocked) {
+      this.setMsg('verifyMsg', 'Election is currently stopped. Verification cannot continue.', true);
+      return;
+    }
     const qrToken = this.activeQrToken || document.getElementById('manualQrToken')?.value?.trim();
     if (!qrToken) {
       this.setMsg('verifyMsg', 'QR token missing.', true);
@@ -517,9 +549,9 @@ class VoterDashboard {
     const captureBtn = document.getElementById('captureOnVoteDay');
     const confirmBtn = document.getElementById('confirmScannedVoter');
 
-    if (startBtn) startBtn.disabled = this.confirmed || this.autoVerifying;
-    if (captureBtn) captureBtn.disabled = this.autoVerifying || !this.qrDetected || this.captureDone || this.confirmed;
-    if (confirmBtn) confirmBtn.disabled = this.autoVerifying || !this.captureDone || this.confirmed;
+    if (startBtn) startBtn.disabled = this.electionLocked || this.confirmed || this.autoVerifying;
+    if (captureBtn) captureBtn.disabled = this.electionLocked || this.autoVerifying || !this.qrDetected || this.captureDone || this.confirmed;
+    if (confirmBtn) confirmBtn.disabled = this.electionLocked || this.autoVerifying || !this.captureDone || this.confirmed;
   }
 
   setupVoteGuard() {
@@ -535,8 +567,10 @@ class VoterDashboard {
       if (!btn.dataset.baseDisabled) {
         btn.dataset.baseDisabled = btn.disabled ? '1' : '0';
       }
-      btn.disabled = btn.dataset.baseDisabled === '1' || notVerified;
-      btn.title = notVerified ? 'QR verification required before voting.' : '';
+      btn.disabled = btn.dataset.baseDisabled === '1' || notVerified || this.electionLocked;
+      btn.title = this.electionLocked
+        ? 'Election is stopped by the administrator.'
+        : (notVerified ? 'QR verification required before voting.' : '');
     });
   }
 

@@ -53,27 +53,28 @@
           </tr>
         </table>
       </div>
-      <input id="addDate" type="submit" name="submit" value="Define Dates">
+      <div class="action-row">
+        <input id="addDate" type="submit" name="submit" value="Define Dates">
+        <button id="emergencyStopBtn" type="button">Emergency Stop Election</button>
+        <button id="restartElectionBtn" type="button">Restart / Reconduct Election</button>
+      </div>
+      <div id="electionStateSummary" class="election-state-summary" aria-live="polite"></div>
       <p id="Aday"></p>
+      <p id="electionControlMsg"></p>
     </div>
 
     <div class="container register-container">
       <legend>Register Voter & Generate ID Card</legend>
+      <p style="margin: 0; color: #d9e7ff; font-size: 13px;">Voter must be at least 18 years old. Voter ID is generated automatically after a successful save.</p>
       <div class="table-wrap">
         <table class="table text-center">
           <tr>
-            <th>Voter ID</th><td><input id="regVoterId" type="text" placeholder="voter001"></td>
             <th>Full Name</th><td><input id="regFullName" type="text" placeholder="Full name"></td>
+            <th>Date of Birth</th><td><input id="regDateOfBirth" type="date"></td>
           </tr>
           <tr>
-            <th>Password</th><td><input id="regPassword" type="password" placeholder="Password"></td>
-            <th>Role</th>
-            <td>
-              <select id="regRole">
-                <option value="user">user</option>
-                <option value="admin">admin</option>
-              </select>
-            </td>
+            <th>Generated Voter ID</th><td><input id="regGeneratedVoterId" type="text" placeholder="Auto-generated after save" readonly></td>
+            <th>Photo Upload</th><td><input id="regPhotoUpload" type="file" accept="image/png,image/jpeg,image/jpg"></td>
           </tr>
         </table>
       </div>
@@ -110,7 +111,7 @@
             <div class="id-middle">
               <div class="id-row"><span class="id-label">Voter ID</span><span id="cardVoterId" class="id-value"></span></div>
               <div class="id-row"><span class="id-label">Full Name</span><span id="cardName" class="id-value"></span></div>
-              <div class="id-row"><span class="id-label">Role</span><span id="cardRole" class="id-value"></span></div>
+              <div class="id-row"><span class="id-label">Date of Birth</span><span id="cardDob" class="id-value"></span></div>
               <div class="id-row"><span class="id-label">Card Status</span><span class="id-value">Active</span></div>
             </div>
 
@@ -154,7 +155,7 @@
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.0/umd/popper.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <script src="../dist/app.bundle.js?v=20260214a" type="module"></script>
+    <script src="../dist/app.bundle.js?v=20260313b" type="module"></script>
     <script src="../js/admin.js?v=20260214a" type="module"></script>
   </body>
 </html>

@@ -126,10 +126,38 @@ button:active {
 
 #Aday,
 #registerMsg,
-#liveReportMsg {
+#liveReportMsg,
+#electionControlMsg {
   font-size: 16px;
   color: #ffffff;
   margin: 0;
+}
+
+.election-state-summary {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #eef6ff;
+  background: rgba(12, 28, 50, 0.55);
+  border: 1px solid rgba(187, 212, 242, 0.24);
+}
+
+.election-state-summary[data-state="stopped"] {
+  color: #ffd6d6;
+  background: rgba(110, 18, 18, 0.45);
+  border-color: rgba(255, 128, 128, 0.32);
+}
+
+.election-state-summary[data-state="running"] {
+  color: #d9ffe8;
+  background: rgba(12, 79, 57, 0.42);
+  border-color: rgba(100, 200, 150, 0.32);
 }
 
 .register-container {

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Verify Vote</title>
+    <link rel="stylesheet" type="text/css" href="../css/public_verifier.css">
+  </head>
+  <body>
+    <div class="page-wrap">
+      <div class="title">
+        <h1>Decentralized Voting Using Ethereum Blockchain</h1>
+        <h2>Public Vote Verifier</h2>
+      </div>
+
+      <nav class="top-nav" aria-label="Main Navigation">
+        <a href="./login.html">Home</a>
+        <a href="./vote.html">Vote</a>
+        <a href="./explorer.html#resultsSection">Results</a>
+        <a href="./verify-vote.html" class="active">Verify Vote</a>
+        <a href="./explorer.html">Explorer</a>
+      </nav>
+
+      <section class="panel">
+        <h3>Verify By Transaction Hash</h3>
+        <div class="input-row">
+          <input id="txHashInput" type="text" placeholder="Enter transaction hash (0x...)">
+          <button id="verifyBtn" type="button" class="btn btn-primary">Verify</button>
+          <button id="useLastTxBtn" type="button" class="btn btn-secondary">Use Last Vote Tx</button>
+        </div>
+        <p id="verifyMsg" class="status"></p>
+      </section>
+
+      <section id="resultPanel" class="panel" style="display:none;">
+        <h3>Vote Receipt</h3>
+        <table class="receipt-table">
+          <tr><th>Status</th><td id="resultStatus"></td></tr>
+          <tr><th>Transaction Hash</th><td id="resultTxHash" class="mono"></td></tr>
+          <tr><th>Event</th><td id="resultEvent"></td></tr>
+          <tr><th>Candidate</th><td id="resultCandidate"></td></tr>
+          <tr><th>Candidate ID</th><td id="resultCandidateId"></td></tr>
+          <tr><th>Party</th><td id="resultParty"></td></tr>
+          <tr><th>Block Number</th><td id="resultBlock"></td></tr>
+          <tr><th>Timestamp</th><td id="resultTimestamp"></td></tr>
+          <tr><th>Wallet</th><td id="resultWallet" class="mono"></td></tr>
+          <tr><th>Gas Used</th><td id="resultGas"></td></tr>
+        </table>
+        <p id="resultHint" class="muted"></p>
+      </section>
+    </div>
+
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.0/umd/popper.min.js"></script>
+    <script src="../dist/app.bundle.js?v=20260313b" type="module"></script>
+    <script src="../js/verify_vote.js?v=20260312a" type="module"></script>
+  </body>
+</html>

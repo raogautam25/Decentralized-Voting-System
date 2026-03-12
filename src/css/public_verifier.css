@@ -1,0 +1,178 @@
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: url('../assets/eth5.jpg') no-repeat center center fixed;
+  background-size: cover;
+  color: #ffffff;
+}
+
+.page-wrap {
+  max-width: 980px;
+  margin: 24px auto 28px auto;
+  padding: 0 12px;
+}
+
+.title {
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.title h1 {
+  margin: 0;
+  font-size: 30px;
+}
+
+.title h2 {
+  margin: 8px 0 0 0;
+  font-size: 21px;
+  color: #d9e7ff;
+}
+
+.top-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin: 0 auto 16px auto;
+}
+
+.top-nav a {
+  text-decoration: none;
+  color: #ecf4ff;
+  padding: 8px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(6, 15, 30, 0.45);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.top-nav a.active {
+  border-color: rgba(100, 200, 150, 0.8);
+  background: rgba(100, 200, 150, 0.2);
+}
+
+.panel {
+  background: rgba(0, 0, 0, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+.panel h3 {
+  margin: 0 0 10px 0;
+  font-size: 18px;
+  color: #ffffff;
+}
+
+.input-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+}
+
+.input-row input {
+  width: 100%;
+  padding: 11px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(0, 0, 0, 0.35);
+  color: #ffffff;
+  font-size: 14px;
+}
+
+.btn {
+  padding: 10px 14px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.btn-primary {
+  background: #1f6ac9;
+}
+
+.btn-secondary {
+  background: #4b5563;
+}
+
+.status {
+  margin-top: 10px;
+  min-height: 20px;
+  color: #8bf6c2;
+  font-size: 14px;
+}
+
+.status.error {
+  color: #ff9595;
+}
+
+.receipt-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+
+.receipt-table th,
+.receipt-table td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  vertical-align: top;
+  font-size: 14px;
+}
+
+.receipt-table th {
+  width: 190px;
+  color: #c8dbff;
+}
+
+.mono {
+  font-family: Consolas, 'Courier New', monospace;
+  word-break: break-all;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.data-table th,
+.data-table td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 10px 8px;
+  text-align: left;
+}
+
+.data-table th {
+  color: #c8dbff;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.muted {
+  color: #a8b8cf;
+}
+
+.tx-link {
+  color: #9cd1ff;
+  text-decoration: none;
+}
+
+@media (max-width: 860px) {
+  .input-row {
+    grid-template-columns: 1fr;
+  }
+}

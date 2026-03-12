@@ -1,5 +1,5 @@
 import { API_BASE } from './config.js';
-import { safeJsonParse } from './utils.js';
+import { fetchJson, safeJsonParse } from './utils.js';
 
 class VoteConfirmation {
   constructor() {
@@ -17,6 +17,8 @@ class VoteConfirmation {
     this.checkingQrVote = false;
     this.candidates = [];
     this.verifyPoll = null;
+    this.electionState = { status: 'running', start_ts: 0, end_ts: 0 };
+    this.electionStateTimer = null;
     this.init();
   }
 
@@ -39,6 +41,8 @@ class VoteConfirmation {
     this.startCamera();
     this.loadCandidatesAndRenderEvm();
     this.startVerificationWatcher();
+    this.refreshElectionState();
+    this.startElectionStatePolling();
     this.applyActionGuard();
   }
 
@@ -86,12 +90,14 @@ class VoteConfirmation {
     const when = String(s.vote_submitted_time || '').trim();
 
     if (msg) {
+      const verifyHref = tx ? `./verify-vote.html?txHash=${encodeURIComponent(tx)}` : './verify-vote.html';
       msg.innerHTML = `
         <div style="padding:10px 12px;border-radius:10px;border:1px solid rgba(100,200,150,0.35);background:rgba(100,200,150,0.12);">
           <p style="margin:0;color:#c7ffd8;font-weight:700;">Last Vote Confirmed</p>
           <p style="margin:6px 0 0 0;color:#e6fff0;font-size:13px;">
             ${cand ? `<b>${cand}</b>${party ? ` (${party})` : ''}<br/>` : ''}
             Tx: <span style="word-break:break-all;">${tx}</span>${block ? `<br/>Block: ${block}` : ''}${when ? `<br/>Time: ${when}` : ''}
+            <br/><a href="${verifyHref}" style="color:#9cd1ff;">Verify this vote</a>
           </p>
         </div>
       `;
@@ -114,6 +120,48 @@ class VoteConfirmation {
     }
     if (okBtn) {
       okBtn.addEventListener('click', () => this.onOkVerified());
+    }
+  }
+
+  startElectionStatePolling() {
+    if (this.electionStateTimer) clearInterval(this.electionStateTimer);
+    this.electionStateTimer = setInterval(() => this.refreshElectionState(), 5000);
+  }
+
+  isElectionStopped() {
+    return String(this.electionState?.status || '').toLowerCase() === 'stopped';
+  }
+
+  updateElectionStatusUi() {
+    const banner = document.getElementById('electionStatusBanner');
+    if (!banner) return;
+
+    const startText = this.electionState?.start_ts
+      ? new Date(Number(this.electionState.start_ts) * 1000).toLocaleString()
+      : 'Not set';
+    const endText = this.electionState?.end_ts
+      ? new Date(Number(this.electionState.end_ts) * 1000).toLocaleString()
+      : 'Not set';
+
+    if (this.isElectionStopped()) {
+      banner.dataset.state = 'stopped';
+      banner.textContent = 'Election is currently stopped by the administrator. Voting and QR verification are disabled.';
+      this.setEvmStatus('Election stopped. Wait for the administrator to restart the election.');
+      return;
+    }
+
+    banner.dataset.state = 'running';
+    banner.textContent = `Election is active. Start: ${startText} | End: ${endText}`;
+  }
+
+  async refreshElectionState() {
+    try {
+      this.electionState = await fetchJson(`${API_BASE}/election/dates`);
+    } catch {
+      this.electionState = this.electionState || { status: 'running', start_ts: 0, end_ts: 0 };
+    } finally {
+      this.updateElectionStatusUi();
+      this.applyActionGuard();
     }
   }
 
@@ -150,6 +198,10 @@ class VoteConfirmation {
   }
 
   onOkVerified() {
+    if (this.isElectionStopped()) {
+      this.showVoteError('Election is currently stopped by the administrator.');
+      return;
+    }
     if (!this.verifiedVoter) {
       this.showVoteError('Please scan QR first.');
       return;
@@ -260,13 +312,15 @@ class VoteConfirmation {
   applyActionGuard() {
     const verified = Boolean(this.verifiedVoter && this.verifiedVoter.qr_token);
     const okBtn = document.getElementById('okVerifiedBtn');
-    if (okBtn) okBtn.disabled = !verified || this.identityOk || this.qrAlreadyVoted;
+    if (okBtn) okBtn.disabled = this.isElectionStopped() || !verified || this.identityOk || this.qrAlreadyVoted;
 
     // EVM buttons locked until: QR verified + user OK + live auto capture done.
-    const canSelect = verified && !this.qrAlreadyVoted && this.identityOk && this.liveGateCaptured;
+    const canSelect = !this.isElectionStopped() && verified && !this.qrAlreadyVoted && this.identityOk && this.liveGateCaptured;
     document.querySelectorAll('.evm-btn').forEach((b) => {
       b.disabled = !canSelect;
-      b.title = canSelect ? '' : 'Complete QR verification and OK (Ready) first.';
+      b.title = canSelect ? '' : (this.isElectionStopped()
+        ? 'Election is stopped by the administrator.'
+        : 'Complete QR verification and OK (Ready) first.');
     });
   }
 
@@ -275,8 +329,7 @@ class VoteConfirmation {
     if (!rowsEl) return;
 
     try {
-      const res = await fetch(`${API_BASE}/candidates`);
-      const data = await res.json();
+      const data = await fetchJson(`${API_BASE}/candidates`);
       this.candidates = (data && data.items) ? data.items : [];
     } catch {
       this.candidates = [];
@@ -316,6 +369,7 @@ class VoteConfirmation {
 
       row.querySelector('.evm-name').textContent = name || 'Unknown';
       row.querySelector('.evm-party').textContent = party || '';
+      this.renderPartySymbol(row.querySelector('.evm-symbol-box'), c);
 
       const btn = row.querySelector('.evm-btn');
       btn.dataset.candidateId = String(id);
@@ -335,7 +389,32 @@ class VoteConfirmation {
     el.textContent = text || '';
   }
 
+  renderPartySymbol(node, candidate) {
+    if (!node) return;
+
+    const imagePath = String(candidate?.party_symbol_image || '').trim();
+    const symbol = String(candidate?.symbol || '').trim();
+    const party = String(candidate?.party || '').trim();
+
+    node.innerHTML = '';
+    if (imagePath) {
+      const img = document.createElement('img');
+      img.src = `${API_BASE}/${imagePath.replace(/^\/+/, '')}`;
+      img.alt = `${party || 'Party'} symbol`;
+      img.className = 'evm-symbol-image';
+      node.appendChild(img);
+      return;
+    }
+
+    const fallback = (symbol || party || 'SYM').slice(0, 3).toUpperCase();
+    node.textContent = fallback;
+  }
+
   onCandidatePressed(btn) {
+    if (this.isElectionStopped()) {
+      this.showVoteError('Election is currently stopped by the administrator.');
+      return;
+    }
     if (!(this.verifiedVoter && this.verifiedVoter.qr_token)) {
       this.showVoteError('Please scan QR first.');
       return;
@@ -476,6 +555,11 @@ class VoteConfirmation {
     }
 
     try {
+      await this.refreshElectionState();
+      if (this.isElectionStopped()) {
+        throw new Error('Election is currently stopped by the administrator.');
+      }
+
       localStorage.setItem('txStatus', 'pending');
       localStorage.setItem('txConfirmations', '0');
 
