@@ -137,7 +137,8 @@ app.get('/favicon.ico', (req, res) => {
   res.sendFile(path.join(__dirname, 'public/favicon.ico'));
 });
 
-// Start the server
-app.listen(8080, () => {
-  console.log('Server listening on http://localhost:8080');
+const PORT = process.env.PORT || 8080;
+
+app.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
 });
