@@ -2,4 +2,4 @@
 window.__API_BASE__ = "";
 window.__RPC_URL__ = "https://ethereum-sepolia-rpc.publicnode.com";
 window.__CHAIN_ID__ = "11155111";
-window.__VOTING_ADDRESS__ = "";
+window.__VOTING_ADDRESS__ = "0xf8e81D47203A594245E36C48e151709F0C19fBe8";
