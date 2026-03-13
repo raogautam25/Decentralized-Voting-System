@@ -199,6 +199,8 @@ async function handleLogin(req, res) {
 
 app.get('/login', handleLogin);
 app.post('/login', handleLogin);
+app.get('/admin/login', handleLogin);
+app.post('/admin/login', handleLogin);
 
 app.get('/js/login.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'src/js/login.js'));
@@ -226,6 +228,14 @@ app.get('/js/app.js', (req, res) => {
 
 app.get('/admin.html', authorizeUser, (req, res) => {
   res.sendFile(path.join(__dirname, 'src/html/admin.html'));
+});
+
+app.get('/admin', authorizeUser, (req, res) => {
+  const authorization = req.query.Authorization;
+  if (authorization) {
+    return res.redirect(302, `/admin.html?Authorization=${encodeURIComponent(authorization)}`);
+  }
+  return res.redirect(302, '/admin.html');
 });
 
 app.get('/candidate-nomination.html', authorizeUser, (req, res) => {

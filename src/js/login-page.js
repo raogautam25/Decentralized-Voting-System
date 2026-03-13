@@ -1,4 +1,4 @@
-const API_BASE = 'https://decentralized-voting-system-ok5o.onrender.com';
+const API_BASE = 'https://decentralized-voting-system.onrender.com';
 const FRONTEND_BASE = window.location.origin;
 
 function safeJsonParse(raw, fallback = null) {

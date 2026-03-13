@@ -13,7 +13,7 @@ loginForm.addEventListener('submit', (event) => {
     'Authorization': `Bearer ${token}`,
   };
 
-  fetch(`http://127.0.0.1:8000/login?voter_id=${voter_id}&password=${password}`, { headers })
+  fetch(`https://decentralized-voting-system.onrender.com/login?voter_id=${voter_id}&password=${password}`, { headers })
   .then(response => {
     if (response.ok) {
       return response.json();
@@ -25,10 +25,10 @@ loginForm.addEventListener('submit', (event) => {
     if (data.role === 'admin') {
       console.log(data.role)
       localStorage.setItem('jwtTokenAdmin', data.token);
-      window.location.replace(`http://127.0.0.1:8080/admin.html?Authorization=Bearer ${localStorage.getItem('jwtTokenAdmin')}`);
+      window.location.replace(`${window.location.origin}/admin.html?Authorization=Bearer ${localStorage.getItem('jwtTokenAdmin')}`);
     } else if (data.role === 'user'){
       localStorage.setItem('jwtTokenVoter', data.token);
-      window.location.replace(`http://127.0.0.1:8080/index.html?Authorization=Bearer ${localStorage.getItem('jwtTokenVoter')}`);
+      window.location.replace(`${window.location.origin}/index.html?Authorization=Bearer ${localStorage.getItem('jwtTokenVoter')}`);
     }
   })
   .catch(error => {

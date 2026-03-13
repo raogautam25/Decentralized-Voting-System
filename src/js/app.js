@@ -5,7 +5,7 @@ const contract = require('@truffle/contract');
 const votingArtifacts = require('../../build/contracts/Voting.json');
 
 const VotingContract = contract(votingArtifacts);
-const API_BASE = 'https://decentralized-voting-system-ok5o.onrender.com';
+const API_BASE = 'https://decentralized-voting-system.onrender.com';
 
 window.App = {
   web3: null,
