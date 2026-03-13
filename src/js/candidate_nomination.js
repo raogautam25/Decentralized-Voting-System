@@ -275,10 +275,12 @@ class CandidateNominationForm {
 
     const electionId = slugify(values.election_id || values.election_name);
     const dupRecord = this.knownKeys.find((item) =>
-      normalizeKey(item.full_name) === normalizeKey(values.full_name) &&
-      normalizeKey(item.date_of_birth) === normalizeKey(values.date_of_birth) &&
-      normalizeKey(item.contact_number) === normalizeKey(values.contact_number) &&
-      normalizeKey(item.id_number) === normalizeKey(values.id_number)
+      normalizeKey(item.id_number) === normalizeKey(values.id_number) ||
+      (
+        normalizeKey(item.full_name) === normalizeKey(values.full_name) &&
+        normalizeKey(item.date_of_birth) === normalizeKey(values.date_of_birth) &&
+        normalizeKey(item.contact_number) === normalizeKey(values.contact_number)
+      )
     );
     if (dupRecord) {
       errors.__duplicate = 'Candidate already exists in database';
@@ -286,9 +288,14 @@ class CandidateNominationForm {
 
     const dupElection = this.knownKeys.find((item) =>
       normalizeKey(item.election_id) === normalizeKey(electionId) &&
-      normalizeKey(item.full_name) === normalizeKey(values.full_name) &&
-      normalizeKey(item.date_of_birth) === normalizeKey(values.date_of_birth) &&
-      normalizeKey(item.id_number) === normalizeKey(values.id_number)
+      (
+        normalizeKey(item.id_number) === normalizeKey(values.id_number) ||
+        (
+          normalizeKey(item.full_name) === normalizeKey(values.full_name) &&
+          normalizeKey(item.date_of_birth) === normalizeKey(values.date_of_birth) &&
+          normalizeKey(item.party_name) === normalizeKey(values.is_independent ? '' : values.party_name)
+        )
+      )
     );
     if (dupElection) {
       errors.__election = 'Candidate is already registered for this election';

@@ -128,6 +128,13 @@ window.App = {
         const deployedAddress = CONFIGURED_VOTING_ADDRESS || artifactAddress;
 
         if (deployedAddress) {
+          const code = await this.web3.eth.getCode(deployedAddress);
+          if (!code || code === '0x' || code === '0x0') {
+            throw new Error(
+              `No contract code found at ${deployedAddress} on chain ${networkId}. ` +
+              'Deploy Voting.sol to Sepolia using MetaMask and update VOTING_CONTRACT_ADDRESS.'
+            );
+          }
           console.log('Using voting contract address:', deployedAddress);
           this.voting = new this.web3.eth.Contract(votingArtifacts.abi, deployedAddress);
         } else {
@@ -160,8 +167,7 @@ window.App = {
             return;
           }
           try {
-            const gas = await this.voting.addCandidate.estimateGas(nameCandidate, partyCandidate, { from: this.account });
-            await this.voting.addCandidate(nameCandidate, partyCandidate, { from: this.account, gas });
+            await this.sendAddCandidateTx(nameCandidate, partyCandidate);
             // Persist candidate to DB so voter dashboard can fetch from MySQL in realtime.
             try {
               const newIdRaw = await this.readCountCandidates();
@@ -197,8 +203,7 @@ window.App = {
             return;
           }
           try {
-            const gas = await this.voting.setDates.estimateGas(startTs, endTs, { from: this.account });
-            await this.voting.setDates(startTs, endTs, { from: this.account, gas });
+            await this.sendSetDatesTx(startTs, endTs);
             // Persist dates to DB for realtime UI; chain still enforces window on vote.
             try {
               await fetch(`${API_BASE}/admin/election/dates`, {
@@ -328,6 +333,32 @@ window.App = {
       return method.send({ from: this.account, gas });
     }
     throw new Error('Contract method voteByQr is unavailable. Redeploy contract and refresh.');
+  },
+
+  sendAddCandidateTx: async function (nameCandidate, partyCandidate) {
+    if (this.voting?.addCandidate?.estimateGas && this.voting?.addCandidate) {
+      const gas = await this.voting.addCandidate.estimateGas(nameCandidate, partyCandidate, { from: this.account });
+      return this.voting.addCandidate(nameCandidate, partyCandidate, { from: this.account, gas });
+    }
+    if (this.voting?.methods?.addCandidate) {
+      const method = this.voting.methods.addCandidate(nameCandidate, partyCandidate);
+      const gas = await method.estimateGas({ from: this.account });
+      return method.send({ from: this.account, gas });
+    }
+    throw new Error('Contract method addCandidate is unavailable. Redeploy contract and refresh.');
+  },
+
+  sendSetDatesTx: async function (startTs, endTs) {
+    if (this.voting?.setDates?.estimateGas && this.voting?.setDates) {
+      const gas = await this.voting.setDates.estimateGas(startTs, endTs, { from: this.account });
+      return this.voting.setDates(startTs, endTs, { from: this.account, gas });
+    }
+    if (this.voting?.methods?.setDates) {
+      const method = this.voting.methods.setDates(startTs, endTs);
+      const gas = await method.estimateGas({ from: this.account });
+      return method.send({ from: this.account, gas });
+    }
+    throw new Error('Contract method setDates is unavailable. Redeploy contract and refresh.');
   },
 
   getVotingAddress: function () {

@@ -332,22 +332,31 @@ def generate_unique_voter_id():
 def candidate_exists_in_database(full_name, date_of_birth, contact_number, id_number):
     return coll("candidate_nominations").find_one(
         {
-            "normalized_full_name": normalize_name(full_name),
-            "date_of_birth": date_of_birth.isoformat(),
-            "contact_number": contact_number or "",
-            "id_number": id_number,
+            "$or": [
+                {"id_number": id_number},
+                {
+                    "normalized_full_name": normalize_name(full_name),
+                    "date_of_birth": date_of_birth.isoformat(),
+                    "contact_number": contact_number or "",
+                },
+            ]
         },
         {"_id": 1},
     ) is not None
 
 
-def candidate_exists_for_election(election_id, full_name, date_of_birth, id_number):
+def candidate_exists_for_election(election_id, full_name, date_of_birth, id_number, party_name=None):
     return coll("candidate_nominations").find_one(
         {
             "election_id": election_id,
-            "normalized_full_name": normalize_name(full_name),
-            "date_of_birth": date_of_birth.isoformat(),
-            "id_number": id_number,
+            "$or": [
+                {"id_number": id_number},
+                {
+                    "normalized_full_name": normalize_name(full_name),
+                    "date_of_birth": date_of_birth.isoformat(),
+                    "party_name": party_name,
+                },
+            ],
         },
         {"_id": 1},
     ) is not None
@@ -364,18 +373,31 @@ def candidate_id_exists_for_election(candidate_id, election_id):
 
 def find_existing_voter_duplicate(full_name, date_of_birth, image_bytes):
     rows = coll("voters").find(
-        {
-            "normalized_full_name": normalize_name(full_name),
-            "date_of_birth": date_of_birth.isoformat(),
-            "is_active": True,
-        },
-        {"image_path": 1, "photo_path": 1},
+        {"is_active": True},
+        {"voter_id": 1, "full_name": 1, "normalized_full_name": 1, "date_of_birth": 1, "image_path": 1, "photo_path": 1},
     )
+    normalized_full_name = normalize_name(full_name)
+    dob_iso = date_of_birth.isoformat()
     existing_paths = []
     for row in rows:
+        if row.get("normalized_full_name") == normalized_full_name and row.get("date_of_birth") == dob_iso:
+            return {
+                "reason": "identity_match",
+                "matched_voter_id": row.get("voter_id"),
+                "matched_full_name": row.get("full_name"),
+                "matched_date_of_birth": row.get("date_of_birth"),
+            }
         rel_path = row.get("image_path") or row.get("photo_path")
         if rel_path:
-            existing_paths.append(rel_path)
+            existing_paths.append(
+                {
+                    "path": rel_path,
+                    "matched_voter_id": row.get("voter_id"),
+                    "matched_full_name": row.get("full_name"),
+                    "matched_date_of_birth": row.get("date_of_birth"),
+                    "reason": "face_match",
+                }
+            )
     if not existing_paths:
         return None
     return find_similar_image(image_bytes, existing_paths, os.path.dirname(__file__))
@@ -446,8 +468,24 @@ async def add_voter(request: Request):
     ensure_minimum_age(date_of_birth, "Voter")
     photo_bytes, photo_mime = decode_image_bytes_from_data_url(photo_data)
 
-    if find_existing_voter_duplicate(full_name, date_of_birth, photo_bytes):
-        raise HTTPException(status_code=409, detail="Person already exists in voter database")
+    duplicate_match = find_existing_voter_duplicate(full_name, date_of_birth, photo_bytes)
+    if duplicate_match:
+        if duplicate_match.get("reason") == "identity_match":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Voter already exists in database with the same full name and date of birth. "
+                    f"Existing voter ID: {duplicate_match.get('matched_voter_id')}"
+                ),
+            )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Face image closely matches an existing voter record. "
+                f"Matched voter ID: {duplicate_match.get('matched_voter_id')}, "
+                f"similarity score: {duplicate_match.get('score')}"
+            ),
+        )
 
     voter_id = generate_unique_voter_id()
     image_path = save_image_bytes(photo_bytes, photo_mime, f"voter_{voter_id}")
@@ -643,9 +681,9 @@ async def check_candidate_nomination(request: Request):
         raise HTTPException(status_code=400, detail="contact_number must be numeric")
 
     if candidate_exists_in_database(full_name, dob, contact_number, id_number):
-        raise HTTPException(status_code=409, detail="Candidate already exists in database")
-    if candidate_exists_for_election(election_id, full_name, dob, id_number):
-        raise HTTPException(status_code=409, detail="Candidate is already registered for this election")
+        raise HTTPException(status_code=409, detail="Candidate already exists in database with the same identity details")
+    if candidate_exists_for_election(election_id, full_name, dob, id_number, None if is_independent else party_name):
+        raise HTTPException(status_code=409, detail="Candidate is already registered for this election with the same identity or party details")
 
     return {"ok": True, "election_id": election_id}
 
@@ -694,9 +732,9 @@ async def create_candidate_nomination(request: Request):
             )
 
     if candidate_exists_in_database(full_name, dob, contact_number, id_number):
-        raise HTTPException(status_code=409, detail="Candidate already exists in database")
-    if candidate_exists_for_election(election_id, full_name, dob, id_number):
-        raise HTTPException(status_code=409, detail="Candidate is already registered for this election")
+        raise HTTPException(status_code=409, detail="Candidate already exists in database with the same identity details")
+    if candidate_exists_for_election(election_id, full_name, dob, id_number, None if is_independent else party_name):
+        raise HTTPException(status_code=409, detail="Candidate is already registered for this election with the same identity or party details")
     if candidate_id_exists_for_election(candidate_id, election_id):
         raise HTTPException(status_code=409, detail="Candidate is already registered for this election")
 
