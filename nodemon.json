@@ -1,0 +1,9 @@
+{
+  "ignore": [
+    "contract-address.json",
+    "client/src/contracts/Voting.json",
+    "client/dist/*",
+    "artifacts/*",
+    "cache/*"
+  ]
+}
