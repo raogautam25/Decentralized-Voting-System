@@ -27,16 +27,34 @@ dotenv.load_dotenv()
 # Initialize the todoapi app
 app = FastAPI()
 
+def get_allowed_origins():
+    allowed = {
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+    }
+
+    configured_origins = os.environ.get("CORS_ALLOWED_ORIGINS", "")
+    for origin in configured_origins.split(","):
+        normalized = origin.strip().rstrip("/")
+        if normalized:
+            allowed.add(normalized)
+
+    frontend_url = os.environ.get("FRONTEND_URL", "").strip().rstrip("/")
+    if frontend_url:
+        allowed.add(frontend_url)
+
+    return sorted(allowed)
+
+
 # Define the allowed origins for CORS
-origins = [
-    "http://localhost:8080",
-    "http://127.0.0.1:8080",
-]
+origins = get_allowed_origins()
+origin_regex = os.environ.get("CORS_ALLOW_ORIGIN_REGEX", r"https://.*\.vercel\.app")
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

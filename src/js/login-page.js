@@ -31,8 +31,6 @@ function setStatus(el, text, { isError = false, isBusy = false } = {}) {
   el.style.color = isError ? '#ff6b6b' : '#64c898';
   el.dataset.busy = isBusy ? '1' : '0';
   el.classList.remove('fade-in');
-  // Force reflow so the fade-in retriggers after repeated updates.
-  // eslint-disable-next-line no-unused-expressions
   el.offsetHeight;
   el.classList.add('fade-in');
 }
@@ -70,7 +68,6 @@ loginForm.addEventListener('submit', async (event) => {
     }
     if (data.role === 'user') {
       localStorage.setItem('jwtTokenVoter', data.token);
-      // Single voting screen: vote.html hosts QR verification + EVM UI.
       window.location.replace(`${FRONTEND_BASE}/vote.html?Authorization=Bearer ${data.token}`);
       return;
     }

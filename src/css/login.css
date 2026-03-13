@@ -124,4 +124,11 @@ input[type="submit"]:disabled {
     transition: background-color 0.3s ease;
     margin: 0 auto; 
   }
+
+  .login-status {
+    min-height: 24px;
+    margin: 16px 0 0;
+    font-size: 14px;
+    color: #64c898;
+  }
   
