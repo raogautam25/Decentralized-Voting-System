@@ -1,14 +1,16 @@
 {
   "name": "decentralized-voting",
   "version": "1.0.0",
-  "private": true,
+  "description": "",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "node index.js",
+    "dev": "nodemon index.js",
     "build:app": "browserify src/js/app.js -o src/dist/app.bundle.js",
-    "test": "echo \"No tests configured\""
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "author": "",
+  "license": "ISC",
   "dependencies": {
     "@truffle/contract": "^4.6.18",
     "browserify": "^17.0.0",
