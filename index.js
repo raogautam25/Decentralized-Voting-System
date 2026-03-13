@@ -208,14 +208,42 @@ async function seedDefaultAdmin() {
 
 let mongoReadyPromise = null;
 
-async function ensureMongoConnection() {
+async function pingMongoConnection() {
+  if (mongoose.connection.readyState !== 1 || !mongoose.connection.db) {
+    return false;
+  }
+
+  try {
+    await mongoose.connection.db.admin().command({ ping: 1 });
+    return true;
+  } catch (error) {
+    console.error('Mongo ping failed:', error.message);
+    return false;
+  }
+}
+
+async function ensureMongoConnection({ verify = false } = {}) {
   if (!mongoUri) {
     console.error('Mongo connection skipped: MONGODB_URI is not configured.');
     return false;
   }
 
   if (mongoose.connection.readyState === 1) {
-    return true;
+    if (!verify) {
+      return true;
+    }
+
+    const healthy = await pingMongoConnection();
+    if (healthy) {
+      return true;
+    }
+
+    mongoReadyPromise = null;
+    try {
+      await mongoose.disconnect();
+    } catch {
+      // ignore disconnect cleanup errors before reconnecting
+    }
   }
 
   if (!mongoReadyPromise) {
@@ -227,6 +255,18 @@ async function ensureMongoConnection() {
       })
       .then(async () => {
         await seedDefaultAdmin();
+
+        if (!verify) {
+          return true;
+        }
+
+        const healthy = await pingMongoConnection();
+        if (!healthy) {
+          await mongoose.disconnect();
+          mongoReadyPromise = null;
+          return false;
+        }
+
         return true;
       })
       .catch((error) => {
@@ -247,11 +287,16 @@ app.use('/dist', express.static(path.join(__dirname, 'src/dist')));
 app.use('/assets', express.static(path.join(__dirname, 'src/assets')));
 
 // Authorization middleware
-const authorizeUser = (req, res, next) => {
+const authorizeUser = async (req, res, next) => {
   const token = req.query.Authorization?.split('Bearer ')[1];
 
   if (!token) {
     return res.status(401).send('<h1 align="center"> Login to Continue </h1>');
+  }
+
+  const mongoConnected = await ensureMongoConnection({ verify: true });
+  if (!mongoConnected) {
+    return res.status(503).send('<h1 align="center"> Login unavailable. MongoDB is disconnected. </h1>');
   }
 
   try {
@@ -272,9 +317,9 @@ app.get('/login.html', (req, res) => {
 });
 
 app.get('/healthz', async (_req, res) => {
-  const mongoConnected = await ensureMongoConnection();
+  const mongoConnected = await ensureMongoConnection({ verify: true });
   res.json({
-    ok: true,
+    ok: mongoConnected,
     mongo: mongoConnected ? 'connected' : 'disconnected',
   });
 });
@@ -287,7 +332,7 @@ async function handleLogin(req, res) {
     return res.status(400).json({ message: 'Username and password are required' });
   }
 
-  const mongoConnected = await ensureMongoConnection();
+  const mongoConnected = await ensureMongoConnection({ verify: true });
   if (!mongoConnected) {
     return res.status(503).json({ message: 'Login service unavailable. Check Render env vars and MongoDB.' });
   }

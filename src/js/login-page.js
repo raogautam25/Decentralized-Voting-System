@@ -1,8 +1,6 @@
-const RENDER_API_BASE = 'https://decentralized-voting-system-ok5o.onrender.com';
 const apiBaseOverride = window.__API_BASE__ || document.querySelector('meta[name="api-base"]')?.content;
-const isRenderHostedUi = window.location.hostname.endsWith('.onrender.com');
-const API_BASE = apiBaseOverride || (isRenderHostedUi ? window.location.origin : RENDER_API_BASE);
-const FRONTEND_BASE = window.location.origin;
+const API_BASE = String(apiBaseOverride || window.location.origin).replace(/\/+$/, '');
+const FRONTEND_BASE = String(window.location.origin).replace(/\/+$/, '');
 
 function safeJsonParse(raw, fallback = null) {
   try {
