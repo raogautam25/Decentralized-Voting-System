@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node scripts/generate_runtime_config.js && node index.js",
-    "dev": "node scripts/generate_runtime_config.js && nodemon index.js",
+    "start": "node scripts/generate_runtime_config.js && npm run build:app && node index.js",
+    "dev": "node scripts/generate_runtime_config.js && npm run build:app && nodemon index.js",
     "build": "node scripts/generate_runtime_config.js && npm run build:app",
     "build:app": "node node_modules/browserify/bin/cmd.js src/js/app.js -o src/dist/app.bundle.js",
     "test": "echo \"Error: no test specified\" && exit 1"

@@ -1,7 +1,8 @@
 fastapi
 uvicorn
 python-dotenv
-mysql-connector-python
+pymongo
+dnspython
 PyJWT
 numpy
 opencv-python-headless
