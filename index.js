@@ -12,6 +12,14 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: false }));
 
 const jwtSecret = process.env.JWT_SECRET || process.env.SECRET_KEY || 'your_super_secret_key';
+const databaseApiBase = String(
+  process.env.DATABASE_API_BASE || process.env.FASTAPI_BASE || process.env.API_BASE || 'http://127.0.0.1:8000'
+)
+  .trim()
+  .replace(/\/+$/, '');
+const chainId = String(process.env.CHAIN_ID || '11155111').trim();
+const rpcUrl = String(process.env.RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com').trim();
+const votingContractAddress = String(process.env.VOTING_CONTRACT_ADDRESS || '').trim();
 
 function normalizeMongoUri(rawValue) {
   let value = String(rawValue || '').trim();
@@ -67,6 +75,63 @@ function maskMongoUri(uri) {
 }
 
 const { source: mongoUriSource, uri: mongoUri } = resolveMongoUri();
+
+function buildProxyRequestBody(req) {
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    return undefined;
+  }
+
+  const contentType = String(req.headers['content-type'] || '').toLowerCase();
+  if (contentType.includes('application/json')) {
+    return JSON.stringify(req.body || {});
+  }
+
+  if (contentType.includes('application/x-www-form-urlencoded')) {
+    return new URLSearchParams(req.body || {}).toString();
+  }
+
+  return undefined;
+}
+
+async function proxyDatabaseApi(req, res) {
+  if (!databaseApiBase) {
+    return res.status(503).json({ message: 'Database API base is not configured.' });
+  }
+
+  try {
+    const targetUrl = new URL(req.originalUrl, `${databaseApiBase}/`);
+    const headers = new Headers();
+
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (!value) continue;
+      if (['host', 'connection', 'content-length'].includes(key.toLowerCase())) continue;
+      headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+    }
+
+    const upstream = await fetch(targetUrl, {
+      method: req.method,
+      headers,
+      body: buildProxyRequestBody(req),
+      redirect: 'manual',
+    });
+
+    res.status(upstream.status);
+    for (const [key, value] of upstream.headers.entries()) {
+      if (['content-type', 'content-disposition', 'cache-control', 'location'].includes(key.toLowerCase())) {
+        res.setHeader(key, value);
+      }
+    }
+
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    return res.send(buffer);
+  } catch (error) {
+    return res.status(502).json({
+      message: `Database API proxy failed for ${req.originalUrl}`,
+      detail: error.message,
+      target: databaseApiBase,
+    });
+  }
+}
 
 const configuredOrigins = new Set();
 for (const raw of [process.env.FRONTEND_URL, process.env.CORS_ALLOWED_ORIGINS]) {
@@ -282,6 +347,18 @@ app.get('/js/app.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'src/js/app.js'));
 });
 
+app.get('/js/runtime-config.js', (_req, res) => {
+  res.type('application/javascript');
+  res.send(
+    [
+      `window.__API_BASE__ = ${JSON.stringify(process.env.FRONTEND_API_BASE || '')};`,
+      `window.__RPC_URL__ = ${JSON.stringify(rpcUrl)};`,
+      `window.__CHAIN_ID__ = ${JSON.stringify(chainId)};`,
+      `window.__VOTING_ADDRESS__ = ${JSON.stringify(votingContractAddress)};`,
+    ].join('\n')
+  );
+});
+
 app.get('/admin.html', authorizeUser, (req, res) => {
   res.sendFile(path.join(__dirname, 'src/html/admin.html'));
 });
@@ -352,6 +429,29 @@ app.post('/admin/sync-chain-to-db', authorizeUser, (req, res) => {
     }
   });
 });
+
+app.all(
+  [
+    '/candidates',
+    '/election/dates',
+    '/vote/audit',
+    '/vote/report',
+    '/admin/voters',
+    '/admin/candidates',
+    '/admin/election/dates',
+    '/admin/election/stop',
+    '/admin/election/restart',
+    '/admin/vote-audit/export',
+    '/admin/database/clear',
+    '/admin/candidate-nominations',
+    '/admin/candidate-nominations/check',
+    '/admin/candidate-nominations/keys',
+    '/voter/by-qr',
+    '/voter/confirm-scan',
+    /^\/media\/.*/,
+  ],
+  proxyDatabaseApi
+);
 
 app.get('/favicon.ico', (req, res) => {
   res.sendFile(path.join(__dirname, 'public/favicon.ico'));

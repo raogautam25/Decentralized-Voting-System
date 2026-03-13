@@ -9,6 +9,13 @@ const RENDER_API_BASE = 'https://decentralized-voting-system-ok5o.onrender.com';
 const apiBaseOverride = window.__API_BASE__ || document.querySelector('meta[name="api-base"]')?.content;
 const isRenderHostedUi = window.location.hostname.endsWith('.onrender.com');
 const API_BASE = apiBaseOverride || (isRenderHostedUi ? window.location.origin : RENDER_API_BASE);
+const rpcUrlOverride = window.__RPC_URL__ || document.querySelector('meta[name="rpc-url"]')?.content;
+const chainIdOverride = window.__CHAIN_ID__ || document.querySelector('meta[name="chain-id"]')?.content;
+const contractAddressOverride = window.__VOTING_ADDRESS__ || document.querySelector('meta[name="voting-address"]')?.content;
+const RPC_URL = String(rpcUrlOverride || 'https://ethereum-sepolia-rpc.publicnode.com').trim();
+const REQUIRED_CHAIN_ID = Number.parseInt(String(chainIdOverride || '11155111'), 10);
+const REQUIRED_CHAIN_HEX = `0x${REQUIRED_CHAIN_ID.toString(16)}`;
+const CONFIGURED_VOTING_ADDRESS = String(contractAddressOverride || '').trim();
 
 window.App = {
   web3: null,
@@ -25,39 +32,36 @@ window.App = {
       this.web3 = new Web3(this.provider);
 
       try {
-        // Check current network and switch to Ganache if needed
+        // Check current network and switch to the configured chain if needed
         const chainId = await this.provider.request({ method: 'eth_chainId' });
         const currentChainId = parseInt(chainId, 16);
         console.log('Current Chain ID:', currentChainId);
         
-        // Use Ganache chain ID 1337
-        if (currentChainId !== 1337) {
-          console.warn('Wrong network! Attempting to switch to Ganache (1337)...');
+        if (currentChainId !== REQUIRED_CHAIN_ID) {
+          console.warn(`Wrong network! Attempting to switch to RPC ${RPC_URL} (chain ${REQUIRED_CHAIN_ID})...`);
           try {
-            // Try 1337 first (Ganache CLI)
             await this.provider.request({
               method: 'wallet_switchEthereumChain',
-              params: [{ chainId: '0x539' }], // 1337 in hex
+              params: [{ chainId: REQUIRED_CHAIN_HEX }],
             });
           } catch (switchError) {
             if (switchError.code === 4902) {
-              // Network not added, try to add it
               try {
                 await this.provider.request({
                   method: 'wallet_addEthereumChain',
                   params: [{
-                    chainId: '0x539',
-                    chainName: 'Ganache Local',
-                    rpcUrls: ['http://127.0.0.1:7545'],
+                    chainId: REQUIRED_CHAIN_HEX,
+                    chainName: REQUIRED_CHAIN_ID === 11155111 ? 'Sepolia' : `Chain ${REQUIRED_CHAIN_ID}`,
+                    rpcUrls: [RPC_URL],
                     nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 }
                   }],
                 });
               } catch (addError) {
                 console.error('Failed to add network:', addError);
-                alert('Please add Ganache network to MetaMask:\nChain ID: 1337\nRPC URL: http://127.0.0.1:7545');
+                alert(`Please add the voting network to MetaMask:\nChain ID: ${REQUIRED_CHAIN_ID}\nRPC URL: ${RPC_URL}`);
               }
             } else {
-              alert('Please manually switch to Ganache network in MetaMask');
+              alert(`Please manually switch MetaMask to chain ${REQUIRED_CHAIN_ID} using RPC ${RPC_URL}`);
             }
           }
         }
@@ -88,8 +92,8 @@ window.App = {
       }
     } else {
       // Fallback to local RPC (development only)
-      console.warn('No EIP-1193 provider found; falling back to http://127.0.0.1:7545');
-      this.provider = new Web3.providers.HttpProvider('http://127.0.0.1:7545');
+      console.warn(`No EIP-1193 provider found; falling back to ${RPC_URL}`);
+      this.provider = new Web3.providers.HttpProvider(RPC_URL);
       this.web3 = new Web3(this.provider);
 
       // Best-effort to fetch an account from local node
@@ -120,35 +124,27 @@ window.App = {
 
         $('#accountAddress').text(this.account ? `Your Account: ${this.account}` : 'No account connected');
 
-      // Load contract instance
-      try {
-        this.voting = await VotingContract.deployed();
-      } catch (err) {
-        console.warn('deployed() failed, attempting manual contract instance:', err.message);
-        
-        // Try to create contract manually with address from artifact for current network id
+        // Load contract instance
         const networkId = String(await this.web3.eth.net.getId());
-        if (votingArtifacts.networks && votingArtifacts.networks[networkId]) {
-          const deployedAddress = votingArtifacts.networks[networkId].address;
-          console.log('Using contract address from artifact:', deployedAddress);
+        const artifactAddress = votingArtifacts.networks?.[networkId]?.address || '';
+        const deployedAddress = CONFIGURED_VOTING_ADDRESS || artifactAddress;
+
+        if (deployedAddress) {
+          console.log('Using voting contract address:', deployedAddress);
           this.voting = new this.web3.eth.Contract(votingArtifacts.abi, deployedAddress);
-          console.log('Contract instance created successfully');
         } else {
-          // Get current network for debugging
           try {
-            const chainId = await this.web3.eth.net.getId();
-            const currentAccount = await this.web3.eth.getAccounts();
+            this.voting = await VotingContract.deployed();
+          } catch (err) {
             console.error('Contract deployment error:', err);
-            console.error('Current Chain ID:', chainId);
-            console.error('Current Account:', currentAccount);
-            
-            alert(`Network Mismatch!\n\nCurrent Network: ${chainId}\nRequired Network: 1337 (Ganache)\n\nPlease switch to Ganache network in MetaMask and refresh. If Ganache network is not in MetaMask, click the network dropdown and select "Add network" then add:\nRPC URL: http://127.0.0.1:7545\nChain ID: 1337`);
-          } catch (e) {
-            console.error('Error getting network info:', e);
+            console.error('Current Chain ID:', networkId);
+            console.error('Configured Contract Address:', CONFIGURED_VOTING_ADDRESS || '(empty)');
+            throw new Error(
+              'Voting contract address is not configured for this network. ' +
+              'Set VOTING_CONTRACT_ADDRESS to your Remix-deployed Sepolia contract address.'
+            );
           }
-          throw err;
         }
-      }
 
         // Initial UI render
         await this.renderDates();
@@ -231,7 +227,13 @@ window.App = {
         return this.voting;
       } catch (err) {
         console.error('Initialization error:', err);
-        alert(`Initialization failed: ${err?.message || err}`);
+        alert(
+          `Initialization failed: ${err?.message || err}\n\n` +
+          `Configured RPC URL: ${RPC_URL}\n` +
+          `Required Chain ID: ${REQUIRED_CHAIN_ID}\n\n` +
+          `Configured Contract Address: ${CONFIGURED_VOTING_ADDRESS || '(not set)'}\n\n` +
+          'Ensure MetaMask is on the same chain and VOTING_CONTRACT_ADDRESS matches your Remix deployment.'
+        );
         throw err;
       } finally {
         this.initPromise = null;

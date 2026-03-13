@@ -3,11 +3,14 @@
 import { API_BASE } from './config.js';
 import { safeJsonParse } from './utils.js';
 
+const rpcUrlOverride = window.__RPC_URL__ || document.querySelector('meta[name="rpc-url"]')?.content;
+const RPC_URL = String(rpcUrlOverride || 'https://ethereum-sepolia-rpc.publicnode.com').trim();
+
 class LoadingManager {
   constructor() {
     this.updateInterval = null;
     this.transactionHash = localStorage.getItem('currentTxHash');
-    this.rpcUrl = 'http://127.0.0.1:7545';
+    this.rpcUrl = RPC_URL;
     // Ganache (local dev) does not naturally produce many empty blocks, so waiting for
     // 12 confirmations can hang the flow and prevent auto-logout for the next voter.
     // Treat "mined (1 confirmation)" as final for this project.
@@ -100,6 +103,14 @@ class LoadingManager {
   }
 
   async rpc(method, params) {
+    if (window.ethereum?.request) {
+      try {
+        return await window.ethereum.request({ method, params });
+      } catch {
+        // fall through to explicit RPC URL
+      }
+    }
+
     const res = await fetch(this.rpcUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
