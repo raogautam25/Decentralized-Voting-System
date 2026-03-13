@@ -47,11 +47,12 @@ loginForm.addEventListener('submit', async (event) => {
   const voter_id = document.getElementById('voter-id')?.value?.trim();
   const password = document.getElementById('password')?.value?.trim();
   if (!voter_id || !password) {
-    setStatus(loginStatus, 'Please enter voter ID and password.', { isError: true });
+    setStatus(loginStatus, 'Please enter username and password.', { isError: true });
     return;
   }
 
-  const token = voter_id;
+  const username = voter_id;
+  const token = username;
   const headers = { Authorization: `Bearer ${token}` };
 
   try {
@@ -59,7 +60,7 @@ loginForm.addEventListener('submit', async (event) => {
     setStatus(loginStatus, 'Signing in...', { isBusy: true });
 
     const data = await fetchJson(
-      `${API_BASE}/login?voter_id=${encodeURIComponent(voter_id)}&password=${encodeURIComponent(password)}`,
+      `${API_BASE}/login?username=${encodeURIComponent(username)}&voter_id=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
       { method: 'GET', headers }
     );
 
