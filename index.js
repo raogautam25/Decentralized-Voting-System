@@ -20,6 +20,10 @@ const databaseApiBase = String(
 const chainId = String(process.env.CHAIN_ID || '11155111').trim();
 const rpcUrl = String(process.env.RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com').trim();
 const votingContractAddress = String(process.env.VOTING_CONTRACT_ADDRESS || '').trim();
+const requireMongoOnStartup = String(process.env.REQUIRE_MONGO_ON_STARTUP || 'true')
+  .trim()
+  .toLowerCase() !== 'false';
+const mongoServerSelectionTimeoutMs = Number(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS || 10000);
 
 function normalizeMongoUri(rawValue) {
   let value = String(rawValue || '').trim();
@@ -217,7 +221,9 @@ async function ensureMongoConnection() {
   if (!mongoReadyPromise) {
     mongoReadyPromise = mongoose
       .connect(mongoUri, {
-        serverSelectionTimeoutMS: 10000,
+        serverSelectionTimeoutMS: Number.isFinite(mongoServerSelectionTimeoutMs)
+          ? mongoServerSelectionTimeoutMs
+          : 10000,
       })
       .then(async () => {
         await seedDefaultAdmin();
@@ -459,6 +465,25 @@ app.get('/favicon.ico', (req, res) => {
 
 const PORT = process.env.PORT || 8080;
 
-app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
+async function startServer() {
+  if (requireMongoOnStartup) {
+    const mongoConnected = await ensureMongoConnection();
+    if (!mongoConnected) {
+      console.error('Server startup aborted: MongoDB connection is required before listening for requests.');
+      process.exit(1);
+    }
+  } else if (mongoUri) {
+    ensureMongoConnection().catch((error) => {
+      console.error('Mongo background connection failed:', error.message);
+    });
+  }
+
+  app.listen(PORT, () => {
+    console.log(`Server listening on port ${PORT}`);
+  });
+}
+
+startServer().catch((error) => {
+  console.error('Server startup failed:', error.message);
+  process.exit(1);
 });
