@@ -1,20 +1,6 @@
 {
   "rewrites": [
-    { "source": "/", "destination": "/src/html/login.html" },
-    { "source": "/login.html", "destination": "/src/html/login.html" },
-    { "source": "/admin.html", "destination": "/src/html/admin.html" },
-    { "source": "/candidate-nomination.html", "destination": "/src/html/candidate_nomination.html" },
-    { "source": "/index.html", "destination": "/src/html/index.html" },
-    { "source": "/voter.html", "destination": "/src/html/voter.html" },
-    { "source": "/vote.html", "destination": "/src/html/vote.html" },
-    { "source": "/verify-vote.html", "destination": "/src/html/verify_vote.html" },
-    { "source": "/verify_vote.html", "destination": "/src/html/verify_vote.html" },
-    { "source": "/explorer.html", "destination": "/src/html/explorer.html" },
-    { "source": "/loading.html", "destination": "/src/html/loading.html" },
-    { "source": "/css/(.*)", "destination": "/src/css/$1" },
-    { "source": "/js/(.*)", "destination": "/src/js/$1" },
-    { "source": "/dist/(.*)", "destination": "/src/dist/$1" },
-    { "source": "/assets/(.*)", "destination": "/src/assets/$1" },
-    { "source": "/favicon.ico", "destination": "/public/favicon.ico" }
+    { "source": "/assets/(.*)", "destination": "/client/dist/assets/$1" },
+    { "source": "/(.*)", "destination": "/client/dist/index.html" }
   ]
 }
