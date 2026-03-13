@@ -13,7 +13,7 @@ loginForm.addEventListener('submit', (event) => {
     'Authorization': `Bearer ${token}`,
   };
 
-  fetch(`https://decentralized-voting-system.onrender.com/login?voter_id=${voter_id}&password=${password}`, { headers })
+  fetch(`https://decentralized-voting-system-ok5o.onrender.com/login?voter_id=${voter_id}&password=${password}`, { headers })
   .then(response => {
     if (response.ok) {
       return response.json();

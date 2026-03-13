@@ -1,4 +1,7 @@
-const API_BASE = 'https://decentralized-voting-system.onrender.com';
+const RENDER_API_BASE = 'https://decentralized-voting-system-ok5o.onrender.com';
+const apiBaseOverride = window.__API_BASE__ || document.querySelector('meta[name="api-base"]')?.content;
+const isRenderHostedUi = window.location.hostname.endsWith('.onrender.com');
+const API_BASE = apiBaseOverride || (isRenderHostedUi ? window.location.origin : RENDER_API_BASE);
 const FRONTEND_BASE = window.location.origin;
 
 function safeJsonParse(raw, fallback = null) {
@@ -77,8 +80,10 @@ loginForm.addEventListener('submit', async (event) => {
   } catch (error) {
     console.error('Login failed:', error?.message || error);
     const message = error?.message === 'Failed to fetch'
-      ? 'Unable to reach the login server. Check backend deployment and CORS settings.'
-      : (error?.message || 'Login failed. Please try again.');
+      ? `Unable to reach the login API at ${API_BASE}. Check deployment URL and CORS.`
+      : error?.status === 503
+        ? 'Backend is reachable, but login is unavailable because MongoDB is not connected on the server.'
+        : (error?.message || 'Login failed. Please try again.');
     setStatus(loginStatus, message, { isError: true });
   } finally {
     if (submitButton) submitButton.disabled = false;

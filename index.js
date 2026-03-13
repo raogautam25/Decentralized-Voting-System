@@ -63,7 +63,7 @@ const adminSchema = new mongoose.Schema(
 const AdminModel = mongoose.models.Admin || mongoose.model('Admin', adminSchema);
 
 async function seedDefaultAdmin() {
-  const username = process.env.ADMIN_USERNAME || 'adm001';
+  const username = process.env.ADMIN_USERNAME || 'admin001';
   const password = process.env.ADMIN_PASSWORD || 'admin123';
   const role = process.env.ADMIN_ROLE || 'admin';
   const fullName = process.env.ADMIN_FULL_NAME || 'System Admin';
