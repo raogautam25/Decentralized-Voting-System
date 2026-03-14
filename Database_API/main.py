@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pymongo import ASCENDING, DESCENDING, MongoClient, ReturnDocument
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
-from duplicate_detection import analyze_image_bytes, find_similar_image
+from duplicate_detection import analyze_image_bytes, compute_similarity_score, find_similar_image
 
 dotenv.load_dotenv()
 
@@ -58,6 +58,7 @@ MINIMUM_AGE_YEARS = 18
 DEFAULT_ELECTION_ID = "default-election"
 VOTER_ID_ALPHABET = string.ascii_uppercase + string.digits
 PRIMARY_ELECTION_CONFIG_ID = "primary"
+LIVE_FACE_VERIFICATION_THRESHOLD = float(os.environ.get("LIVE_FACE_VERIFICATION_THRESHOLD", "0.90"))
 
 mongo_client = None
 mongo_db = None
@@ -403,6 +404,42 @@ def find_existing_voter_duplicate(full_name, date_of_birth, image_bytes):
     return find_similar_image(image_bytes, existing_paths, os.path.dirname(__file__))
 
 
+def get_voter_photo_path(voter):
+    return voter.get("image_path") or voter.get("photo_path")
+
+
+def validate_single_face_image(image_bytes, context_label):
+    analysis = analyze_image_bytes(image_bytes)
+    if analysis["face_count"] == 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No clear face detected in the {context_label}. Please use a front-facing photo with good lighting.",
+        )
+    if analysis["face_count"] > 1:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Multiple faces detected in the {context_label}. Please keep only one voter in frame.",
+        )
+    return analysis
+
+
+def verify_live_face_against_voter(voter, image_bytes, context_label="live photo"):
+    photo_path = get_voter_photo_path(voter)
+    if not photo_path:
+        raise HTTPException(status_code=500, detail="Registered voter photo is missing")
+
+    analysis = validate_single_face_image(image_bytes, context_label)
+    score = compute_similarity_score(image_bytes, photo_path, os.path.dirname(__file__))
+    matched = score >= LIVE_FACE_VERIFICATION_THRESHOLD
+    return {
+        "matched": matched,
+        "score": round(float(score), 4),
+        "threshold": LIVE_FACE_VERIFICATION_THRESHOLD,
+        "face_count": analysis["face_count"],
+        "photo_path": photo_path,
+    }
+
+
 def refresh_vote_rankings():
     rows = list(coll("vote_report_live").find({}, {"_id": 0}).sort([("vote_count", DESCENDING), ("candidate_id", ASCENDING)]))
     updated_at = utc_now()
@@ -467,18 +504,7 @@ async def add_voter(request: Request):
     date_of_birth = parse_iso_date(dob_raw)
     ensure_minimum_age(date_of_birth, "Voter")
     photo_bytes, photo_mime = decode_image_bytes_from_data_url(photo_data)
-    photo_analysis = analyze_image_bytes(photo_bytes)
-
-    if photo_analysis["face_count"] == 0:
-        raise HTTPException(
-            status_code=400,
-            detail="No clear face detected in the uploaded image. Please use a front-facing photo with good lighting.",
-        )
-    if photo_analysis["face_count"] > 1:
-        raise HTTPException(
-            status_code=400,
-            detail="Multiple faces detected in the uploaded image. Please upload a photo containing only the voter.",
-        )
+    photo_analysis = validate_single_face_image(photo_bytes, "uploaded image")
 
     duplicate_match = find_existing_voter_duplicate(full_name, date_of_birth, photo_bytes)
     if duplicate_match:
@@ -889,6 +915,17 @@ async def confirm_scan(request: Request):
     if not voter:
         raise HTTPException(status_code=404, detail="Voter not found for this QR")
 
+    live_image_bytes, _live_image_mime = decode_image_bytes_from_data_url(image_data)
+    verification = verify_live_face_against_voter(voter, live_image_bytes, "live verification image")
+    if not verification["matched"]:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Live face does not match the voter ID card image. "
+                f"Similarity score: {verification['score']}, required: {verification['threshold']}"
+            ),
+        )
+
     image_path = voter.get("image_path") or voter.get("photo_path")
     return {
         "message": "Scan confirmed",
@@ -899,7 +936,47 @@ async def confirm_scan(request: Request):
         "image_path": image_path,
         "date_of_birth": voter.get("date_of_birth"),
         "on_vote_day_image_path": save_image_from_data_url(image_data, f"scan_{voter['voter_id']}"),
+        "face_verified": True,
+        "face_similarity_score": verification["score"],
+        "face_similarity_threshold": verification["threshold"],
         "confirmed_at": stringify_datetime(utc_now()),
+    }
+
+
+@app.post("/voter/ready-check")
+async def ready_check(request: Request):
+    ensure_election_running()
+    payload = await request.json()
+    qr_token = (payload.get("qr_token") or "").strip()
+    image_data = payload.get("image_data")
+    if not qr_token or not image_data:
+        raise HTTPException(status_code=400, detail="qr_token and image_data are required")
+
+    voter = coll("voters").find_one(
+        {"qr_token": qr_token, "is_active": True},
+        {"_id": 0, "voter_id": 1, "full_name": 1, "role": 1, "image_path": 1, "photo_path": 1, "date_of_birth": 1},
+    )
+    if not voter:
+        raise HTTPException(status_code=404, detail="Voter not found for this QR")
+
+    live_image_bytes, _live_image_mime = decode_image_bytes_from_data_url(image_data)
+    verification = verify_live_face_against_voter(voter, live_image_bytes, "ready-check live image")
+    if not verification["matched"]:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Ready check failed because the live face does not match the voter card image. "
+                f"Similarity score: {verification['score']}, required: {verification['threshold']}"
+            ),
+        )
+
+    return {
+        "message": "Ready check passed",
+        "voter_id": voter["voter_id"],
+        "full_name": voter.get("full_name"),
+        "face_verified": True,
+        "face_similarity_score": verification["score"],
+        "face_similarity_threshold": verification["threshold"],
     }
 
 

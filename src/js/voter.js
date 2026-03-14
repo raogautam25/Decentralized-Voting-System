@@ -497,13 +497,17 @@ class VoterDashboard {
         qr_token: qrToken,
         on_vote_day_image: this.onVoteDayImage,
         on_vote_day_image_path: data.on_vote_day_image_path,
+        face_similarity_score: data.face_similarity_score,
       };
       localStorage.setItem('verifiedVoter', JSON.stringify(this.verifiedVoter));
       this.confirmed = true;
       this.autoVerifying = false;
       this.updateActionButtons();
       this.applyVoteGuard();
-      this.setMsg('verifyMsg', `Verified: ${data.full_name} (${data.voter_id})`);
+      this.setMsg(
+        'verifyMsg',
+        `Verified: ${data.full_name} (${data.voter_id}) | Face match score: ${data.face_similarity_score}`
+      );
       this.renderScannedVoter(data);
     } catch (e) {
       this.setMsg('verifyMsg', `Confirm failed: ${e.message}`, true);

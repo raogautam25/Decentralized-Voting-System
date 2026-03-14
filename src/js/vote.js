@@ -10,6 +10,7 @@ class VoteConfirmation {
     this.voteWindowTimer = null;
     this.voteWindowRemaining = 0;
     this.votingInProgress = false;
+    this.readyCheckInProgress = false;
     this.liveGateCaptured = false; // auto capture (5s) after OK
     this.identityOk = false;
     this.qrAlreadyVoted = false;
@@ -72,6 +73,7 @@ class VoteConfirmation {
     this.checkingQrVote = false;
     this.preVoteImage = null;
     this.votingInProgress = false;
+    this.readyCheckInProgress = false;
 
     this.setEvmStatus('Press "Start QR Scan" to begin verification for the next voter.');
   }
@@ -197,6 +199,21 @@ class VoteConfirmation {
     }
   }
 
+  async verifyReadyFace(liveImageData) {
+    if (!(this.verifiedVoter && this.verifiedVoter.qr_token)) {
+      throw new Error('Please scan QR first.');
+    }
+
+    return fetchJson(`${API_BASE}/voter/ready-check`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        qr_token: this.verifiedVoter.qr_token,
+        image_data: liveImageData,
+      }),
+    });
+  }
+
   onOkVerified() {
     if (this.isElectionStopped()) {
       this.showVoteError('Election is currently stopped by the administrator.');
@@ -212,6 +229,7 @@ class VoteConfirmation {
     }
     if (this.identityOk) return;
     this.identityOk = true;
+    this.readyCheckInProgress = true;
 
     const okBtn = document.getElementById('okVerifiedBtn');
     if (okBtn) {
@@ -222,14 +240,15 @@ class VoteConfirmation {
     this.setEvmStatus('Ready for live photo. Auto capture in 5 seconds...');
     const messageContainer = document.getElementById('message');
     if (messageContainer) {
-      messageContainer.innerHTML = '<p style="color:#87ceeb;">Hold still. Live photo will capture in 5 seconds...</p>';
+      messageContainer.innerHTML = '<p style="color:#87ceeb;">Hold still. Live photo will capture in 5 seconds, then face match check will run.</p>';
       messageContainer.classList.add('show', 'info');
     }
 
-    setTimeout(() => {
+    setTimeout(async () => {
       const snap = this.captureCurrentFrame();
       if (!snap) {
         this.identityOk = false;
+        this.readyCheckInProgress = false;
         if (okBtn) {
           okBtn.disabled = false;
           okBtn.textContent = 'OK (Ready)';
@@ -237,14 +256,40 @@ class VoteConfirmation {
         this.showVoteError('Live photo capture failed. Please try OK again.');
         return;
       }
-      this.liveGateCaptured = true;
-      // Keep gate photo only for gating; preVoteImage is captured at candidate press.
-      this.setEvmStatus('Live photo captured. Now press a BLUE button to select candidate.');
-      if (okBtn) {
-        okBtn.disabled = true;
-        okBtn.textContent = 'Ready';
+
+      try {
+        const readyCheck = await this.verifyReadyFace(snap);
+        this.liveGateCaptured = true;
+        this.readyCheckInProgress = false;
+        this.verifiedVoter = {
+          ...this.verifiedVoter,
+          ready_check_image: snap,
+          ready_check_score: readyCheck.face_similarity_score,
+        };
+        localStorage.setItem('verifiedVoter', JSON.stringify(this.verifiedVoter));
+
+        this.setEvmStatus(
+          `Face matched (${readyCheck.face_similarity_score}). Now press a BLUE button to select candidate.`
+        );
+        if (messageContainer) {
+          messageContainer.innerHTML = `<p style="color:#90ee90;">Face matched with voter card image. Score: <b>${readyCheck.face_similarity_score}</b>. You can vote now.</p>`;
+          messageContainer.classList.add('show', 'info');
+        }
+        if (okBtn) {
+          okBtn.disabled = true;
+          okBtn.textContent = 'Ready';
+        }
+        this.applyActionGuard();
+      } catch (error) {
+        this.identityOk = false;
+        this.liveGateCaptured = false;
+        this.readyCheckInProgress = false;
+        if (okBtn) {
+          okBtn.disabled = false;
+          okBtn.textContent = 'OK (Ready)';
+        }
+        this.showVoteError(error?.message || 'Live face verification failed. Please try again.');
       }
-      this.applyActionGuard();
     }, 5000);
   }
 
@@ -312,7 +357,7 @@ class VoteConfirmation {
   applyActionGuard() {
     const verified = Boolean(this.verifiedVoter && this.verifiedVoter.qr_token);
     const okBtn = document.getElementById('okVerifiedBtn');
-    if (okBtn) okBtn.disabled = this.isElectionStopped() || !verified || this.identityOk || this.qrAlreadyVoted;
+    if (okBtn) okBtn.disabled = this.isElectionStopped() || !verified || this.identityOk || this.qrAlreadyVoted || this.readyCheckInProgress;
 
     // EVM buttons locked until: QR verified + user OK + live auto capture done.
     const canSelect = !this.isElectionStopped() && verified && !this.qrAlreadyVoted && this.identityOk && this.liveGateCaptured;
@@ -470,7 +515,7 @@ class VoteConfirmation {
       return;
     }
 
-    this.setEvmStatus(`Selected: ${this.candidateData.name}. Tap "Vote Confirm" within 10 seconds.`);
+    this.setEvmStatus(`Selected: ${this.candidateData.name}. Tap "Vote Confirm" within 15 seconds.`);
     this.startVoteWindow();
   }
 
@@ -485,14 +530,14 @@ class VoteConfirmation {
 
   startVoteWindow() {
     const messageContainer = document.getElementById('message');
-    this.voteWindowRemaining = 10;
+    this.voteWindowRemaining = 15;
 
     if (!document.getElementById('finalVoteBtn')) {
       const btn = document.createElement('button');
       btn.id = 'finalVoteBtn';
       btn.className = 'btn btn-success';
       btn.type = 'button';
-      btn.textContent = 'Vote Confirm (10)';
+      btn.textContent = 'Vote Confirm (15)';
       btn.disabled = false;
       btn.addEventListener('click', () => this.submitVote());
       document.querySelector('.button-group')?.appendChild(btn);
@@ -503,7 +548,7 @@ class VoteConfirmation {
     finalBtn.textContent = `Vote Confirm (${this.voteWindowRemaining})`;
 
     if (messageContainer) {
-      messageContainer.innerHTML = `<p style="color:#87ceeb;">Candidate: <b>${this.candidateData.name}</b> (${this.candidateData.party}). 10 sec ke andar confirm karo.</p>`;
+      messageContainer.innerHTML = `<p style="color:#87ceeb;">Candidate: <b>${this.candidateData.name}</b> (${this.candidateData.party}). 15 sec ke andar confirm karo.</p>`;
       messageContainer.classList.add('show', 'info');
     }
 
@@ -515,7 +560,7 @@ class VoteConfirmation {
         finalBtn.disabled = true;
         finalBtn.textContent = 'Vote Window Closed';
         if (messageContainer) {
-          messageContainer.innerHTML = '<p style="color:#ff7b7b;">10 sec window khatam. Candidate dubara select karo.</p>';
+          messageContainer.innerHTML = '<p style="color:#ff7b7b;">15 sec window khatam. Candidate dubara select karo.</p>';
         }
         // reset selection so user must re-confirm
         localStorage.removeItem('selectedCandidate');
