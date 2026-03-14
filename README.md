@@ -29,6 +29,7 @@ This project focuses on voter authenticity and election transparency by using:
 - CSV vote audit export
 - Public vote verification by transaction hash
 - Public explorer for vote events and result transparency
+- Optional sentiment feedback after confirmation, plus ML-driven vote prediction and anomaly detection insights
 
 ## Current Architecture
 
@@ -39,6 +40,7 @@ This project focuses on voter authenticity and election transparency by using:
 | Web server | Node.js, Express | `index.js` |
 | Backend API | FastAPI, PyMongo | `Database_API/main.py` |
 | Face verification | OpenCV, NumPy | `Database_API/duplicate_detection.py` |
+| Machine learning | scikit-learn, vaderSentiment | `Database_API/vote_prediction.py`, `Database_API/sentiment.py`, `Database_API/anomaly_detection.py` |
 | Database | MongoDB | configured via `.env` |
 | Smart contract | Solidity, Truffle | `contracts/Voting.sol` |
 
@@ -70,6 +72,7 @@ Detailed page-by-page documentation is available in [PAGES.md](./PAGES.md).
 10. The voter selects a candidate and confirms within 15 seconds.
 11. The vote is written to the blockchain and audit data is stored in the backend.
 12. The voter session is cleared automatically for the next voter.
+13. A short optional feedback textarea appears on the loading screen and, if filled, stores sentiment details for each candidate.
 
 ## Voter Authenticity Features
 
@@ -120,8 +123,17 @@ Higher values make the match stricter but can also reject genuine voters if ligh
 | `/voter/ready-check` | Perform ready-to-vote live face match |
 | `/vote/audit` | Save audit trail after successful vote |
 | `/vote/report` | Fetch live vote report |
+| `/vote/prediction` | Predict final vote counts, winner, and confidence with LinearRegression insights |
+| `/vote/sentiment-report` | Aggregate voter feedback sentiment per candidate (requires optional feedback submission) |
 | `/admin/vote-audit/export` | Download vote audit CSV |
 | `/admin/database/clear` | Clear database records and media |
+| `/admin/anomaly-report` | Admin-only vote rate anomaly windows detected with Isolation Forest |
+
+## Machine Learning Enhancements
+
+- **Vote prediction** (`LinearRegression` via `scikit-learn`) consumes current vote counts, audit history, and registered voter totals to forecast final counts, winner, and confidence on `/vote/prediction`.
+- **Sentiment analysis** (VADER via `vaderSentiment`) captures the optional feedback textarea on the loading screen, stores sentiment label/score in each audit row, and exposes aggregates per candidate at `/vote/sentiment-report`.
+- **Anomaly detection** (`IsolationForest` via `scikit-learn`) reviews vote timestamps from the audit collection and reports suspicious fast voting windows to admins through `/admin/anomaly-report` after JWT role validation.
 
 ## Smart Contract Responsibilities
 

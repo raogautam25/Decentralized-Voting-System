@@ -27,6 +27,32 @@
           <p>Block Number: <span id="blockNumber" class="text-muted">Pending...</span></p>
           <p>Confirmations: <span id="confirmationCount" class="text-muted">0</span>/<span id="confirmationTarget" class="text-muted">1</span></p>
         </div>
+
+        <!-- Add this optional feedback block after .transaction-info and before .progress-container -->
+        <div
+          id="feedbackContainer"
+          style="display:none; margin-top:20px; padding:16px; border:1px solid rgba(255,255,255,0.18); border-radius:12px; background:rgba(0,0,0,0.15); text-align:left;"
+        >
+          <label for="voteFeedback" style="display:block; font-weight:600; margin-bottom:8px;">
+            Optional feedback about your voting experience
+          </label>
+          <textarea
+            id="voteFeedback"
+            rows="4"
+            maxlength="500"
+            placeholder="Share your feedback here (optional)"
+            style="width:100%; resize:vertical; border-radius:8px; padding:10px; border:1px solid #c9ced6; box-sizing:border-box;"
+          ></textarea>
+          <p id="feedbackStatus" style="margin:10px 0 0; font-size:14px;">You can submit feedback now, or skip and continue.</p>
+          <div style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap;">
+            <button id="submitFeedbackBtn" type="button" style="padding:10px 16px; border:none; border-radius:8px; cursor:pointer;">
+              Submit Feedback
+            </button>
+            <button id="skipFeedbackBtn" type="button" style="padding:10px 16px; border:1px solid #c9ced6; border-radius:8px; background:transparent; color:inherit; cursor:pointer;">
+              Skip
+            </button>
+          </div>
+        </div>
       </div>
 
       <div class="progress-container">

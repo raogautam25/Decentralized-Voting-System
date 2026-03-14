@@ -499,6 +499,7 @@ app.all(
     '/admin/candidate-nominations/keys',
     '/voter/by-qr',
     '/voter/confirm-scan',
+    '/voter/ready-check',
     /^\/media\/.*/,
   ],
   proxyDatabaseApi

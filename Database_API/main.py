@@ -21,7 +21,10 @@ from fastapi.staticfiles import StaticFiles
 from pymongo import ASCENDING, DESCENDING, MongoClient, ReturnDocument
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
+from anomaly_detection import generate_anomaly_report, require_admin_role
 from duplicate_detection import analyze_image_bytes, compute_similarity_score, find_similar_image
+from sentiment import analyze_feedback, build_sentiment_report
+from vote_prediction import generate_vote_prediction_report
 
 dotenv.load_dotenv()
 
@@ -1002,6 +1005,7 @@ async def save_vote_audit(request: Request):
     tx_hash = payload.get("tx_hash")
     pre_vote_image = payload.get("pre_vote_image")
     on_vote_day_image = payload.get("on_vote_day_image")
+    feedback_details = analyze_feedback(payload.get("feedback"))
 
     pre_vote_blob, pre_vote_mime = decode_image_bytes_from_data_url(pre_vote_image) if pre_vote_image else (None, None)
     on_vote_day_blob, on_vote_day_mime = decode_image_bytes_from_data_url(on_vote_day_image) if on_vote_day_image else (None, None)
@@ -1009,27 +1013,52 @@ async def save_vote_audit(request: Request):
     on_vote_day_path = save_image_bytes(on_vote_day_blob, on_vote_day_mime, f"on_vote_{voter_id}") if on_vote_day_blob else None
 
     try:
-        if coll("vote_audit").find_one({"voter_id": voter_id}, {"_id": 1}):
+        existing_audit = coll("vote_audit").find_one({"voter_id": voter_id}, {"_id": 1, "tx_hash": 1})
+        if existing_audit:
+            if feedback_details:
+                coll("vote_audit").update_one(
+                    {"voter_id": voter_id},
+                    {
+                        "$set": {
+                            "feedback": feedback_details["feedback"],
+                            "sentiment_label": feedback_details["sentiment_label"],
+                            "sentiment_score": feedback_details["sentiment_score"],
+                            "sentiment_breakdown": feedback_details["sentiment_breakdown"],
+                            "feedback_submitted_at": utc_now(),
+                            "tx_hash": tx_hash or existing_audit.get("tx_hash"),
+                        }
+                    },
+                )
+                return {"message": "Vote feedback saved"}
             raise HTTPException(status_code=409, detail="Vote audit already exists for this voter")
 
         voted_at = utc_now()
-        coll("vote_audit").insert_one(
-            {
-                "audit_id": next_sequence("vote_audit"),
-                "voter_id": voter_id,
-                "candidate_id": candidate_id,
-                "candidate_name": candidate_name,
-                "party": party,
-                "pre_vote_image_path": pre_vote_path,
-                "on_vote_day_image_path": on_vote_day_path,
-                "pre_vote_image_blob": Binary(pre_vote_blob) if pre_vote_blob else None,
-                "on_vote_day_image_blob": Binary(on_vote_day_blob) if on_vote_day_blob else None,
-                "pre_vote_image_mime": pre_vote_mime,
-                "on_vote_day_image_mime": on_vote_day_mime,
-                "tx_hash": tx_hash,
-                "voted_at": voted_at,
-            }
-        )
+        audit_record = {
+            "audit_id": next_sequence("vote_audit"),
+            "voter_id": voter_id,
+            "candidate_id": candidate_id,
+            "candidate_name": candidate_name,
+            "party": party,
+            "pre_vote_image_path": pre_vote_path,
+            "on_vote_day_image_path": on_vote_day_path,
+            "pre_vote_image_blob": Binary(pre_vote_blob) if pre_vote_blob else None,
+            "on_vote_day_image_blob": Binary(on_vote_day_blob) if on_vote_day_blob else None,
+            "pre_vote_image_mime": pre_vote_mime,
+            "on_vote_day_image_mime": on_vote_day_mime,
+            "tx_hash": tx_hash,
+            "voted_at": voted_at,
+        }
+        if feedback_details:
+            audit_record.update(
+                {
+                    "feedback": feedback_details["feedback"],
+                    "sentiment_label": feedback_details["sentiment_label"],
+                    "sentiment_score": feedback_details["sentiment_score"],
+                    "sentiment_breakdown": feedback_details["sentiment_breakdown"],
+                    "feedback_submitted_at": voted_at,
+                }
+            )
+        coll("vote_audit").insert_one(audit_record)
         coll("vote_report_live").update_one(
             {"candidate_id": candidate_id},
             {
@@ -1073,6 +1102,30 @@ async def get_vote_report():
             for row in rows
         ]
     }
+
+
+@app.get("/vote/prediction")
+async def get_vote_prediction():
+    return generate_vote_prediction_report(
+        voters_collection=coll("voters"),
+        candidates_collection=coll("candidates"),
+        vote_report_collection=coll("vote_report_live"),
+        vote_audit_collection=coll("vote_audit"),
+    )
+
+
+@app.get("/vote/sentiment-report")
+async def get_vote_sentiment_report():
+    return build_sentiment_report(
+        vote_audit_collection=coll("vote_audit"),
+        candidates_collection=coll("candidates"),
+    )
+
+
+@app.get("/admin/anomaly-report")
+async def get_anomaly_report(request: Request):
+    require_admin_role(request, os.environ.get("SECRET_KEY", "your_super_secret_key"))
+    return generate_anomaly_report(vote_audit_collection=coll("vote_audit"))
 
 
 @app.get("/admin/vote-audit/export")

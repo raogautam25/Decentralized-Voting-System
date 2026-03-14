@@ -11,6 +11,8 @@ class LoadingManager {
     this.updateInterval = null;
     this.transactionHash = localStorage.getItem('currentTxHash');
     this.rpcUrl = RPC_URL;
+    this.finalized = false;
+    this.feedbackTimeoutMs = 15000;
     // Ganache (local dev) does not naturally produce many empty blocks, so waiting for
     // 12 confirmations can hang the flow and prevent auto-logout for the next voter.
     // Treat "mined (1 confirmation)" as final for this project.
@@ -48,6 +50,10 @@ class LoadingManager {
   }
 
   async checkTransactionStatus() {
+    if (this.finalized) {
+      return;
+    }
+
     if (!this.transactionHash) {
       this.showError('Missing transaction hash. Please vote again.');
       clearInterval(this.updateInterval);
@@ -86,10 +92,12 @@ class LoadingManager {
       this.updateUI(final ? 'confirmed' : 'confirming', String(Math.min(conf, this.confirmTarget)));
 
       if (final) {
+        this.finalized = true;
         clearInterval(this.updateInterval);
         this.persistLastTransactionSummary();
         await this.syncPendingAudit();
         this.updateDoneMessage();
+        await this.handleOptionalFeedback();
         this.logoutForNextVoter();
         setTimeout(() => {
           // Replace history entry so browser back/forward cache doesn't resurrect old voter UI state.
@@ -125,8 +133,8 @@ class LoadingManager {
     const msg = document.getElementById('loadingMessage');
     const info = document.getElementById('loadingInfo');
     const short = this.transactionHash ? this.shortenHash(this.transactionHash) : '';
-    if (msg) msg.textContent = `Vote confirmed${short ? ` (Tx ${short})` : ''}. Logging out for the next voter...`;
-    if (info) info.textContent = 'Please wait...';
+    if (msg) msg.textContent = `Vote confirmed${short ? ` (Tx ${short})` : ''}.`;
+    if (info) info.textContent = 'Optional feedback is available for 15 seconds before the session resets.';
   }
 
   persistLastTransactionSummary() {
@@ -168,6 +176,7 @@ class LoadingManager {
     localStorage.removeItem('voteSubmittedTime');
     localStorage.removeItem('txError');
     localStorage.removeItem('txStatus');
+    localStorage.removeItem('pendingVoteFeedback');
 
     // Used by voter.js to force fresh verification if the user navigates back.
     localStorage.setItem('lastVoteCompleted', '1');
@@ -190,6 +199,120 @@ class LoadingManager {
     } catch (error) {
       console.warn('Pending audit sync failed:', error);
     }
+  }
+
+  async handleOptionalFeedback() {
+    const feedbackContainer = document.getElementById('feedbackContainer');
+    const feedbackInput = document.getElementById('voteFeedback');
+    const feedbackStatus = document.getElementById('feedbackStatus');
+    const submitButton = document.getElementById('submitFeedbackBtn');
+    const skipButton = document.getElementById('skipFeedbackBtn');
+
+    if (!feedbackContainer || !feedbackInput || !submitButton || !skipButton) {
+      return;
+    }
+
+    feedbackContainer.style.display = 'block';
+    feedbackInput.value = localStorage.getItem('pendingVoteFeedback') || '';
+    if (feedbackStatus) {
+      feedbackStatus.textContent = 'You can submit feedback now, or skip and continue automatically.';
+    }
+
+    return await new Promise((resolve) => {
+      let completed = false;
+
+      const finish = () => {
+        if (completed) {
+          return;
+        }
+        completed = true;
+        localStorage.removeItem('pendingVoteFeedback');
+        feedbackInput.removeEventListener('input', handleInput);
+        submitButton.removeEventListener('click', handleSubmit);
+        skipButton.removeEventListener('click', handleSkip);
+        clearTimeout(timeoutId);
+        resolve();
+      };
+
+      const handleInput = () => {
+        localStorage.setItem('pendingVoteFeedback', feedbackInput.value);
+      };
+
+      const handleSkip = () => {
+        if (feedbackStatus) {
+          feedbackStatus.textContent = 'Feedback skipped. Resetting session...';
+        }
+        finish();
+      };
+
+      const handleSubmit = async () => {
+        const feedback = feedbackInput.value.trim();
+        if (!feedback) {
+          handleSkip();
+          return;
+        }
+
+        submitButton.disabled = true;
+        skipButton.disabled = true;
+        if (feedbackStatus) {
+          feedbackStatus.textContent = 'Saving your feedback...';
+        }
+
+        try {
+          await this.saveFeedback(feedback);
+          if (feedbackStatus) {
+            feedbackStatus.textContent = 'Feedback saved. Resetting session...';
+          }
+        } catch (error) {
+          if (feedbackStatus) {
+            feedbackStatus.textContent = 'Feedback could not be saved. Continuing without it.';
+          }
+        } finally {
+          finish();
+        }
+      };
+
+      feedbackInput.addEventListener('input', handleInput);
+      submitButton.addEventListener('click', handleSubmit);
+      skipButton.addEventListener('click', handleSkip);
+
+      const timeoutId = setTimeout(() => {
+        if (feedbackStatus) {
+          feedbackStatus.textContent = 'Time window ended. Resetting session...';
+        }
+        finish();
+      }, this.feedbackTimeoutMs);
+    });
+  }
+
+  async saveFeedback(feedback) {
+    const pendingAudit = safeJsonParse(localStorage.getItem('pendingVoteAudit'), null);
+    const lastSummary = safeJsonParse(localStorage.getItem('lastTxSummary'), null);
+    const payload = pendingAudit?.voter_id
+      ? {
+          ...pendingAudit,
+          feedback,
+          tx_hash: pendingAudit.tx_hash || lastSummary?.tx_hash || this.transactionHash || '',
+        }
+      : {
+          voter_id: lastSummary?.voter_id || '',
+          candidate_id: lastSummary?.candidate_id || '',
+          candidate_name: lastSummary?.candidate_name || '',
+          party: lastSummary?.party || '',
+          tx_hash: lastSummary?.tx_hash || this.transactionHash || '',
+          feedback,
+        };
+
+    const res = await fetch(`${API_BASE}/vote/audit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.detail || 'Feedback save failed');
+    }
+    localStorage.removeItem('pendingVoteAudit');
   }
 
   updateUI(status, confirmations) {
