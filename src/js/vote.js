@@ -515,7 +515,7 @@ class VoteConfirmation {
       return;
     }
 
-    this.setEvmStatus(`Selected: ${this.candidateData.name}. Tap "Vote Confirm" within 15 seconds.`);
+    this.setEvmStatus(`Selected: ${this.candidateData.name}. Tap "Vote Confirm" within 30 seconds.`);
     this.startVoteWindow();
   }
 
@@ -530,14 +530,14 @@ class VoteConfirmation {
 
   startVoteWindow() {
     const messageContainer = document.getElementById('message');
-    this.voteWindowRemaining = 15;
+    this.voteWindowRemaining = 30;
 
     if (!document.getElementById('finalVoteBtn')) {
       const btn = document.createElement('button');
       btn.id = 'finalVoteBtn';
       btn.className = 'btn btn-success';
       btn.type = 'button';
-      btn.textContent = 'Vote Confirm (15)';
+      btn.textContent = 'Vote Confirm (30)';
       btn.disabled = false;
       btn.addEventListener('click', () => this.submitVote());
       document.querySelector('.button-group')?.appendChild(btn);
@@ -548,7 +548,7 @@ class VoteConfirmation {
     finalBtn.textContent = `Vote Confirm (${this.voteWindowRemaining})`;
 
     if (messageContainer) {
-      messageContainer.innerHTML = `<p style="color:#87ceeb;">Candidate: <b>${this.candidateData.name}</b> (${this.candidateData.party}). 15 sec ke andar confirm karo.</p>`;
+      messageContainer.innerHTML = `<p style="color:#87ceeb;">Candidate: <b>${this.candidateData.name}</b> (${this.candidateData.party}). 30 sec ke andar confirm karo.</p>`;
       messageContainer.classList.add('show', 'info');
     }
 
@@ -560,7 +560,7 @@ class VoteConfirmation {
         finalBtn.disabled = true;
         finalBtn.textContent = 'Vote Window Closed';
         if (messageContainer) {
-          messageContainer.innerHTML = '<p style="color:#ff7b7b;">15 sec window khatam. Candidate dubara select karo.</p>';
+          messageContainer.innerHTML = '<p style="color:#ff7b7b;">30 sec window khatam. Candidate dubara select karo.</p>';
         }
         // reset selection so user must re-confirm
         localStorage.removeItem('selectedCandidate');
