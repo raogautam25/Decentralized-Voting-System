@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pymongo import ASCENDING, DESCENDING, MongoClient, ReturnDocument
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
-from duplicate_detection import find_similar_image
+from duplicate_detection import analyze_image_bytes, find_similar_image
 
 dotenv.load_dotenv()
 
@@ -467,6 +467,18 @@ async def add_voter(request: Request):
     date_of_birth = parse_iso_date(dob_raw)
     ensure_minimum_age(date_of_birth, "Voter")
     photo_bytes, photo_mime = decode_image_bytes_from_data_url(photo_data)
+    photo_analysis = analyze_image_bytes(photo_bytes)
+
+    if photo_analysis["face_count"] == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No clear face detected in the uploaded image. Please use a front-facing photo with good lighting.",
+        )
+    if photo_analysis["face_count"] > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Multiple faces detected in the uploaded image. Please upload a photo containing only the voter.",
+        )
 
     duplicate_match = find_existing_voter_duplicate(full_name, date_of_birth, photo_bytes)
     if duplicate_match:
@@ -483,6 +495,8 @@ async def add_voter(request: Request):
             detail=(
                 "Face image closely matches an existing voter record. "
                 f"Matched voter ID: {duplicate_match.get('matched_voter_id')}, "
+                f"matched name: {duplicate_match.get('matched_full_name')}, "
+                f"matched date of birth: {duplicate_match.get('matched_date_of_birth')}, "
                 f"similarity score: {duplicate_match.get('score')}"
             ),
         )
@@ -505,6 +519,8 @@ async def add_voter(request: Request):
                 "photo_path": image_path,
                 "qr_token": qr_token,
                 "is_active": True,
+                "face_count": photo_analysis["face_count"],
+                "face_match_version": 2,
                 "created_at": now,
                 "updated_at": now,
             }

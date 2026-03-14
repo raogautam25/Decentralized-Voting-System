@@ -90,6 +90,17 @@ class AdminTools {
     setStatus(byId('registerMsg'), 'Photo captured.');
   }
 
+  formatRegistrationError(error) {
+    const message = error?.message || 'Registration failed.';
+    if (message.includes('Face image closely matches an existing voter record')) {
+      return `Duplicate face detected. ${message}`;
+    }
+    if (message.includes('No clear face detected') || message.includes('Multiple faces detected')) {
+      return `Photo validation failed. ${message}`;
+    }
+    return `Save failed: ${message}`;
+  }
+
   async handlePhotoUpload(event) {
     const file = event?.target?.files?.[0];
     if (!file) return;
@@ -131,6 +142,7 @@ class AdminTools {
     }
 
     try {
+      byId('voterCard').style.display = 'none';
       byId('regGeneratedVoterId').value = '';
       setStatus(byId('registerMsg'), 'Saving voter...', { isBusy: true });
       const data = await fetchJson(`${API_BASE}/admin/voters`, {
@@ -142,7 +154,8 @@ class AdminTools {
       this.renderCard(data, payload.photo_data);
       setStatus(byId('registerMsg'), `Voter saved: ${data.voter_id}`, { isBusy: false });
     } catch (e) {
-      setStatus(byId('registerMsg'), `Save failed: ${e.message}`, { isError: true, isBusy: false });
+      byId('voterCard').style.display = 'none';
+      setStatus(byId('registerMsg'), this.formatRegistrationError(e), { isError: true, isBusy: false });
     }
   }
 

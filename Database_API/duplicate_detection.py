@@ -7,6 +7,10 @@ import numpy as np
 FACE_CASCADE = cv2.CascadeClassifier(
     os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
 )
+FACE_MATCH_THRESHOLD = 0.88
+FACE_IMAGE_SIZE = (64, 64)
+CLAHE = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+HOG_DESCRIPTOR = cv2.HOGDescriptor(FACE_IMAGE_SIZE, (16, 16), (8, 8), (8, 8), 9)
 
 
 def _load_grayscale_image_from_bytes(image_bytes):
@@ -22,25 +26,32 @@ def _load_grayscale_image_from_path(path):
     return cv2.imread(path, cv2.IMREAD_GRAYSCALE)
 
 
-def _normalize_image(image):
-    if image is None:
-        return None
-    normalized = cv2.resize(image, (64, 64), interpolation=cv2.INTER_AREA)
-    return cv2.GaussianBlur(normalized, (3, 3), 0)
-
-
-def _extract_primary_face(image):
+def _detect_faces(image):
     if image is None or FACE_CASCADE.empty():
-        return None
-
+        return []
     faces = FACE_CASCADE.detectMultiScale(
         image,
         scaleFactor=1.1,
         minNeighbors=5,
         minSize=(48, 48),
     )
-    if len(faces) == 0:
+    return sorted(faces, key=lambda face: face[2] * face[3], reverse=True)
+
+
+def _prepare_image(image):
+    if image is None:
         return None
+    normalized = cv2.resize(image, FACE_IMAGE_SIZE, interpolation=cv2.INTER_AREA)
+    normalized = CLAHE.apply(normalized)
+    return cv2.GaussianBlur(normalized, (3, 3), 0)
+
+
+def _extract_primary_face(image, faces=None):
+    if image is None:
+        return None, 0
+    faces = faces if faces is not None else _detect_faces(image)
+    if len(faces) == 0:
+        return None, 0
 
     x, y, w, h = max(faces, key=lambda face: face[2] * face[3])
     pad_x = int(w * 0.18)
@@ -49,12 +60,58 @@ def _extract_primary_face(image):
     y1 = max(y - pad_y, 0)
     x2 = min(x + w + pad_x, image.shape[1])
     y2 = min(y + h + pad_y, image.shape[0])
-    return image[y1:y2, x1:x2]
+    return image[y1:y2, x1:x2], len(faces)
+
+
+def _compute_lbp_histogram(image):
+    if image is None or image.shape[0] < 3 or image.shape[1] < 3:
+        return None
+
+    center = image[1:-1, 1:-1]
+    lbp = np.zeros_like(center, dtype=np.uint8)
+    offsets = [
+        (-1, -1),
+        (-1, 0),
+        (-1, 1),
+        (0, 1),
+        (1, 1),
+        (1, 0),
+        (1, -1),
+        (0, -1),
+    ]
+    for bit_index, (dy, dx) in enumerate(offsets):
+        neighborhood = image[1 + dy : image.shape[0] - 1 + dy, 1 + dx : image.shape[1] - 1 + dx]
+        lbp |= ((neighborhood >= center).astype(np.uint8) << bit_index)
+
+    histogram = cv2.calcHist([lbp], [0], None, [32], [0, 256])
+    return cv2.normalize(histogram, histogram).flatten()
+
+
+def _cosine_similarity(left, right):
+    if left is None or right is None:
+        return 0.0
+    denominator = float(np.linalg.norm(left) * np.linalg.norm(right))
+    if denominator == 0:
+        return 0.0
+    return float(np.dot(left, right) / denominator)
+
+
+def _clamp_unit(value):
+    return max(0.0, min(1.0, float(value)))
+
+
+def analyze_image_bytes(image_bytes):
+    image = _load_grayscale_image_from_bytes(image_bytes)
+    if image is None:
+        return {"face_count": 0, "has_face": False}
+    face_count = len(_detect_faces(image))
+    return {"face_count": int(face_count), "has_face": face_count > 0}
 
 
 def _image_signature(image):
-    face_crop = _extract_primary_face(image)
-    normalized = _normalize_image(face_crop if face_crop is not None else image)
+    faces = _detect_faces(image)
+    face_crop, face_count = _extract_primary_face(image, faces)
+    normalized = _prepare_image(face_crop if face_crop is not None else image)
     if normalized is None:
         return None
 
@@ -64,8 +121,17 @@ def _image_signature(image):
 
     histogram = cv2.calcHist([normalized], [0], None, [32], [0, 256])
     histogram = cv2.normalize(histogram, histogram).flatten()
+    lbp_histogram = _compute_lbp_histogram(normalized)
+    hog_descriptor = HOG_DESCRIPTOR.compute(normalized)
 
-    return average_hash, histogram, face_crop is not None
+    return {
+        "average_hash": average_hash,
+        "histogram": histogram,
+        "lbp_histogram": lbp_histogram,
+        "hog_descriptor": hog_descriptor.reshape(-1) if hog_descriptor is not None else None,
+        "has_face": face_crop is not None,
+        "face_count": face_count,
+    }
 
 
 def compute_similarity_score(source_bytes, existing_image_path, base_dir):
@@ -85,18 +151,32 @@ def compute_similarity_score(source_bytes, existing_image_path, base_dir):
     if not source_sig or not target_sig:
         return 0.0
 
-    source_hash, source_hist, source_has_face = source_sig
-    target_hash, target_hist, target_has_face = target_sig
+    hash_distance = np.count_nonzero(source_sig["average_hash"] != target_sig["average_hash"])
+    hash_similarity = 1.0 - (hash_distance / float(source_sig["average_hash"].size))
+    hist_similarity = _clamp_unit(
+        (cv2.compareHist(source_sig["histogram"], target_sig["histogram"], cv2.HISTCMP_CORREL) + 1.0) / 2.0
+    )
+    lbp_similarity = _clamp_unit(
+        cv2.compareHist(source_sig["lbp_histogram"], target_sig["lbp_histogram"], cv2.HISTCMP_INTERSECT)
+    )
+    hog_similarity = _clamp_unit(
+        _cosine_similarity(source_sig["hog_descriptor"], target_sig["hog_descriptor"])
+    )
+    face_bonus = 0.05 if source_sig["has_face"] and target_sig["has_face"] else 0.0
 
-    hash_distance = np.count_nonzero(source_hash != target_hash)
-    hash_similarity = 1.0 - (hash_distance / float(source_hash.size))
-    hist_similarity = float(cv2.compareHist(source_hist, target_hist, cv2.HISTCMP_CORREL))
-    face_bonus = 0.08 if source_has_face and target_has_face else 0.0
+    return float(
+        min(
+        1.0,
+        (hog_similarity * 0.45)
+        + (lbp_similarity * 0.25)
+        + (hash_similarity * 0.15)
+        + (hist_similarity * 0.10)
+        + face_bonus,
+        )
+    )
 
-    return min(1.0, (hash_similarity * 0.65) + (hist_similarity * 0.27) + face_bonus)
 
-
-def find_similar_image(source_bytes, existing_image_paths, base_dir, threshold=0.90):
+def find_similar_image(source_bytes, existing_image_paths, base_dir, threshold=FACE_MATCH_THRESHOLD):
     best_match = None
     best_score = 0.0
 
@@ -108,9 +188,10 @@ def find_similar_image(source_bytes, existing_image_paths, base_dir, threshold=0
             best_score = score
 
     if best_score >= threshold:
+        rounded_score = float(round(best_score, 4))
         if isinstance(best_match, dict):
-          result = dict(best_match)
-          result["score"] = round(best_score, 4)
-          return result
-        return {"path": best_match, "score": round(best_score, 4)}
+            result = dict(best_match)
+            result["score"] = rounded_score
+            return result
+        return {"path": best_match, "score": rounded_score}
     return None
