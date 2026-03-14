@@ -153,6 +153,65 @@
       <p id="liveReportMsg"></p>
     </div>
 
+    <div class="container">
+      <legend>ML Reports</legend>
+      <div class="action-row">
+        <button id="loadPredictionBtn" type="button">Load Vote Prediction</button>
+        <button id="loadAnomalyBtn" type="button">Load Anomaly Report</button>
+        <button id="loadSentimentBtn" type="button">Load Sentiment Report</button>
+      </div>
+      <p id="mlReportMsg"></p>
+
+      <div class="table-wrap">
+        <table class="table text-center">
+          <thead>
+            <tr>
+              <th>Candidate</th>
+              <th>Current Votes</th>
+              <th>Predicted Final</th>
+              <th>Trend Slope</th>
+              <th>Model Fit</th>
+            </tr>
+          </thead>
+          <tbody id="mlPredictionBody"></tbody>
+        </table>
+      </div>
+      <p id="mlPredictionSummary" style="margin-top: 6px;"></p>
+
+      <div class="table-wrap">
+        <table class="table text-center">
+          <thead>
+            <tr>
+              <th>Window Start</th>
+              <th>Window End</th>
+              <th>Votes</th>
+              <th>Rate/Min</th>
+              <th>Anomaly Score</th>
+            </tr>
+          </thead>
+          <tbody id="mlAnomalyBody"></tbody>
+        </table>
+      </div>
+      <p id="mlAnomalySummary" style="margin-top: 6px;"></p>
+
+      <div class="table-wrap">
+        <table class="table text-center">
+          <thead>
+            <tr>
+              <th>Candidate</th>
+              <th>Total Feedback</th>
+              <th>Positive</th>
+              <th>Neutral</th>
+              <th>Negative</th>
+              <th>Avg Score</th>
+            </tr>
+          </thead>
+          <tbody id="mlSentimentBody"></tbody>
+        </table>
+      </div>
+      <p id="mlSentimentSummary" style="margin-top: 6px;"></p>
+    </div>
+
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.0/umd/popper.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>

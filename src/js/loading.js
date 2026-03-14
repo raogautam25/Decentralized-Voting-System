@@ -12,7 +12,7 @@ class LoadingManager {
     this.transactionHash = localStorage.getItem('currentTxHash');
     this.rpcUrl = RPC_URL;
     this.finalized = false;
-    this.feedbackTimeoutMs = 15000;
+    this.feedbackTimeoutMs = 0;
     // Ganache (local dev) does not naturally produce many empty blocks, so waiting for
     // 12 confirmations can hang the flow and prevent auto-logout for the next voter.
     // Treat "mined (1 confirmation)" as final for this project.
@@ -134,7 +134,7 @@ class LoadingManager {
     const info = document.getElementById('loadingInfo');
     const short = this.transactionHash ? this.shortenHash(this.transactionHash) : '';
     if (msg) msg.textContent = `Vote confirmed${short ? ` (Tx ${short})` : ''}.`;
-    if (info) info.textContent = 'Optional feedback is available for 15 seconds before the session resets.';
+    if (info) info.textContent = 'Optional feedback is available. Submit or skip to continue.';
   }
 
   persistLastTransactionSummary() {
@@ -215,11 +215,14 @@ class LoadingManager {
     feedbackContainer.style.display = 'block';
     feedbackInput.value = localStorage.getItem('pendingVoteFeedback') || '';
     if (feedbackStatus) {
-      feedbackStatus.textContent = 'You can submit feedback now, or skip and continue automatically.';
+      feedbackStatus.textContent = this.feedbackTimeoutMs > 0
+        ? 'You can submit feedback now, or skip and continue automatically.'
+        : 'You can submit feedback now, or skip to continue.';
     }
 
     return await new Promise((resolve) => {
       let completed = false;
+      let timeoutId = null;
 
       const finish = () => {
         if (completed) {
@@ -230,7 +233,7 @@ class LoadingManager {
         feedbackInput.removeEventListener('input', handleInput);
         submitButton.removeEventListener('click', handleSubmit);
         skipButton.removeEventListener('click', handleSkip);
-        clearTimeout(timeoutId);
+        if (timeoutId) clearTimeout(timeoutId);
         resolve();
       };
 
@@ -276,12 +279,14 @@ class LoadingManager {
       submitButton.addEventListener('click', handleSubmit);
       skipButton.addEventListener('click', handleSkip);
 
-      const timeoutId = setTimeout(() => {
-        if (feedbackStatus) {
-          feedbackStatus.textContent = 'Time window ended. Resetting session...';
-        }
-        finish();
-      }, this.feedbackTimeoutMs);
+      if (this.feedbackTimeoutMs > 0) {
+        timeoutId = setTimeout(() => {
+          if (feedbackStatus) {
+            feedbackStatus.textContent = 'Time window ended. Resetting session...';
+          }
+          finish();
+        }, this.feedbackTimeoutMs);
+      }
     });
   }
 

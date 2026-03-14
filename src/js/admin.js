@@ -63,10 +63,14 @@ class AdminTools {
     byId('saveQrBtn')?.addEventListener('click', () => this.saveGeneratedQr());
     byId('downloadVoteAuditBtn')?.addEventListener('click', () => this.downloadVoteAuditReport());
     byId('clearDatabaseBtn')?.addEventListener('click', () => this.clearDatabaseData());
+    byId('loadPredictionBtn')?.addEventListener('click', () => this.loadPredictionReport());
+    byId('loadAnomalyBtn')?.addEventListener('click', () => this.loadAnomalyReport());
+    byId('loadSentimentBtn')?.addEventListener('click', () => this.loadSentimentReport());
     byId('emergencyStopBtn')?.addEventListener('click', () => this.emergencyStopElection());
     byId('restartElectionBtn')?.addEventListener('click', () => this.restartElection());
     this.initNominationFrame();
     this.startLiveReport();
+    this.resetMlReports();
     this.refreshElectionState();
     this.startElectionStatePolling();
   }
@@ -254,7 +258,7 @@ class AdminTools {
 
   async clearDatabaseData() {
     const ok = window.confirm(
-      'This will DELETE ALL data from the database (voters, candidates, votes, audit, reports) and remove saved images.\n\nType YES in the next prompt to continue.'
+      'This will DELETE ALL data from the database (voters, candidates, votes, audit, reports) and remove saved images.\n\nOn-chain explorer data will NOT be deleted.\n\nType YES in the next prompt to continue.'
     );
     if (!ok) return;
     const typed = window.prompt('Type YES to confirm database wipe:');
@@ -270,7 +274,11 @@ class AdminTools {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirm_key: 'CLEAR_ALL' }),
       });
-      setStatus(byId('liveReportMsg'), `Cleared: ${data.cleared_tables?.join(', ') || 'done'}`, { isBusy: false });
+      setStatus(
+        byId('liveReportMsg'),
+        `Cleared: ${data.cleared_tables?.join(', ') || 'done'}. On-chain explorer data stays until contract redeploy.`,
+        { isBusy: false }
+      );
       this.refreshElectionState();
       // Reset UI fragments
       byId('liveReportBody').innerHTML = '';
@@ -343,6 +351,145 @@ class AdminTools {
       setStatus(byId('liveReportMsg'), 'Live report auto-refresh every 4s.');
     } catch (e) {
       setStatus(byId('liveReportMsg'), `Report error: ${e.message}`, { isError: true });
+    }
+  }
+
+  setMlStatus(text, opts) {
+    setStatus(byId('mlReportMsg'), text, opts);
+  }
+
+  resetMlReports() {
+    const predictionBody = byId('mlPredictionBody');
+    if (predictionBody) {
+      predictionBody.innerHTML = '<tr><td colspan="5">Load prediction report to view ML output.</td></tr>';
+    }
+    const anomalyBody = byId('mlAnomalyBody');
+    if (anomalyBody) {
+      anomalyBody.innerHTML = '<tr><td colspan="5">Load anomaly report to view ML output.</td></tr>';
+    }
+    const sentimentBody = byId('mlSentimentBody');
+    if (sentimentBody) {
+      sentimentBody.innerHTML = '<tr><td colspan="6">Load sentiment report to view ML output.</td></tr>';
+    }
+    if (byId('mlPredictionSummary')) byId('mlPredictionSummary').textContent = '';
+    if (byId('mlAnomalySummary')) byId('mlAnomalySummary').textContent = '';
+    if (byId('mlSentimentSummary')) byId('mlSentimentSummary').textContent = '';
+  }
+
+  async loadPredictionReport() {
+    try {
+      this.setMlStatus('Loading vote prediction...', { isBusy: true });
+      const data = await fetchJson(`${API_BASE}/vote/prediction`);
+      this.renderPredictionReport(data);
+      this.setMlStatus('Vote prediction loaded.', { isBusy: false });
+    } catch (e) {
+      this.setMlStatus(`Prediction error: ${e.message}`, { isError: true, isBusy: false });
+    }
+  }
+
+  renderPredictionReport(data) {
+    const body = byId('mlPredictionBody');
+    if (!body) return;
+    const items = Array.isArray(data?.items) ? data.items : [];
+    if (items.length === 0) {
+      body.innerHTML = '<tr><td colspan="5">No prediction data yet.</td></tr>';
+    } else {
+      body.innerHTML = items.map((item) => `
+        <tr>
+          <td>${item.candidate_name || 'Unknown'}</td>
+          <td>${Number(item.current_vote_count || 0)}</td>
+          <td>${Number(item.predicted_final_vote_count || 0)}</td>
+          <td>${Number(item.trend_slope_per_vote || 0)}</td>
+          <td>${Number(item.model_fit_score || 0)}</td>
+        </tr>
+      `).join('');
+    }
+
+    const summary = byId('mlPredictionSummary');
+    if (summary) {
+      const winner = data?.predicted_winner?.candidate_name
+        ? `${data.predicted_winner.candidate_name} (${data.predicted_winner.predicted_final_vote_count || 0})`
+        : 'None';
+      summary.textContent = `Votes cast: ${Number(data?.votes_cast_so_far || 0)}. Turnout: ${Number(data?.turnout_progress_percent || 0)}%. Predicted winner: ${winner}. Confidence: ${Number(data?.confidence_percentage || 0)}%.`;
+    }
+  }
+
+  async loadAnomalyReport() {
+    try {
+      const token = this.getAdminJwt();
+      if (!token) {
+        this.setMlStatus('Admin token missing. Login again.', { isError: true });
+        return;
+      }
+      this.setMlStatus('Loading anomaly report...', { isBusy: true });
+      const data = await fetchJson(`${API_BASE}/admin/anomaly-report`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      this.renderAnomalyReport(data);
+      this.setMlStatus('Anomaly report loaded.', { isBusy: false });
+    } catch (e) {
+      this.setMlStatus(`Anomaly error: ${e.message}`, { isError: true, isBusy: false });
+    }
+  }
+
+  renderAnomalyReport(data) {
+    const body = byId('mlAnomalyBody');
+    if (!body) return;
+    const items = Array.isArray(data?.items) ? data.items : [];
+    if (items.length === 0) {
+      body.innerHTML = '<tr><td colspan="5">No anomalies detected.</td></tr>';
+    } else {
+      body.innerHTML = items.map((item) => `
+        <tr>
+          <td>${item.window_start || 'N/A'}</td>
+          <td>${item.window_end || 'N/A'}</td>
+          <td>${Number(item.vote_count || 0)}</td>
+          <td>${Number(item.rate_per_minute || 0)}</td>
+          <td>${Number(item.anomaly_score || 0)}</td>
+        </tr>
+      `).join('');
+    }
+
+    const summary = byId('mlAnomalySummary');
+    if (summary) {
+      const note = data?.note ? ` ${data.note}` : '';
+      summary.textContent = `Suspicious windows: ${Number(data?.suspicious_window_count || 0)}. Window size: ${Number(data?.analysis_window_minutes || 0)} min.${note}`;
+    }
+  }
+
+  async loadSentimentReport() {
+    try {
+      this.setMlStatus('Loading sentiment report...', { isBusy: true });
+      const data = await fetchJson(`${API_BASE}/vote/sentiment-report`);
+      this.renderSentimentReport(data);
+      this.setMlStatus('Sentiment report loaded.', { isBusy: false });
+    } catch (e) {
+      this.setMlStatus(`Sentiment error: ${e.message}`, { isError: true, isBusy: false });
+    }
+  }
+
+  renderSentimentReport(data) {
+    const body = byId('mlSentimentBody');
+    if (!body) return;
+    const items = Array.isArray(data?.items) ? data.items : [];
+    if (items.length === 0) {
+      body.innerHTML = '<tr><td colspan="6">No feedback sentiment yet.</td></tr>';
+    } else {
+      body.innerHTML = items.map((item) => `
+        <tr>
+          <td>${item.candidate_name || 'Unknown'}</td>
+          <td>${Number(item.total_feedback || 0)}</td>
+          <td>${Number(item.positive_count || 0)}</td>
+          <td>${Number(item.neutral_count || 0)}</td>
+          <td>${Number(item.negative_count || 0)}</td>
+          <td>${Number(item.average_sentiment_score || 0)}</td>
+        </tr>
+      `).join('');
+    }
+
+    const summary = byId('mlSentimentSummary');
+    if (summary) {
+      summary.textContent = `Candidates with feedback: ${Number(data?.candidates_with_feedback || 0)} of ${Number(data?.total_candidates || 0)}.`;
     }
   }
 
