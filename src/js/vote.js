@@ -48,6 +48,9 @@ class VoteConfirmation {
   }
 
   resetUiToStart() {
+    this.clearVoteWindowTimer();
+    this.voteWindowRemaining = 0;
+
     // Clear any stale UI fragments (in case of partial reloads / cached DOM).
     const okBtn = document.getElementById('okVerifiedBtn');
     if (okBtn) {
@@ -76,6 +79,13 @@ class VoteConfirmation {
     this.readyCheckInProgress = false;
 
     this.setEvmStatus('Press "Start QR Scan" to begin verification for the next voter.');
+  }
+
+  clearVoteWindowTimer() {
+    if (this.voteWindowTimer) {
+      clearInterval(this.voteWindowTimer);
+      this.voteWindowTimer = null;
+    }
   }
 
   showLastTransactionSummary() {
@@ -552,11 +562,15 @@ class VoteConfirmation {
       messageContainer.classList.add('show', 'info');
     }
 
-    if (this.voteWindowTimer) clearInterval(this.voteWindowTimer);
+    this.clearVoteWindowTimer();
     this.voteWindowTimer = setInterval(() => {
+      if (this.votingInProgress) {
+        return;
+      }
+
       this.voteWindowRemaining -= 1;
       if (this.voteWindowRemaining <= 0) {
-        clearInterval(this.voteWindowTimer);
+        this.clearVoteWindowTimer();
         finalBtn.disabled = true;
         finalBtn.textContent = 'Vote Window Closed';
         if (messageContainer) {
@@ -592,11 +606,28 @@ class VoteConfirmation {
       return;
     }
 
+    const candidateSnapshot = { ...this.candidateData };
+    const verifiedVoterSnapshot = { ...this.verifiedVoter };
+    const preVoteImageSnapshot = this.preVoteImage;
+
     this.votingInProgress = true;
+    this.clearVoteWindowTimer();
+
     const finalBtn = document.getElementById('finalVoteBtn');
     if (finalBtn) {
       finalBtn.disabled = true;
       finalBtn.textContent = 'Processing...';
+    }
+
+    this.setEvmStatus(`Submitting vote for ${candidateSnapshot.name}. Please wait for blockchain confirmation.`);
+    const messageContainer = document.getElementById('message');
+    if (messageContainer) {
+      messageContainer.innerHTML = `
+        <p style="color:#87ceeb;">
+          Transaction submit ho rahi hai. Wallet confirm ho chuki hai to page band mat karo.
+        </p>
+      `;
+      messageContainer.classList.add('show', 'info');
     }
 
     try {
@@ -615,7 +646,7 @@ class VoteConfirmation {
         await window.App.eventStart();
       }
 
-      const txRes = await window.App.voteByCandidateId(this.candidateData.id);
+      const txRes = await window.App.voteByCandidateId(candidateSnapshot.id);
       const txInfo = this.extractTxInfo(txRes);
       if (!txInfo.txHash) {
         // Some providers return a PromiEvent or a Truffle "result" object; if we still
@@ -629,7 +660,12 @@ class VoteConfirmation {
       localStorage.setItem('txConfirmations', txInfo.blockNumber ? '1' : '0');
       localStorage.setItem('voteSubmittedTime', new Date().toISOString());
 
-      const auditPayload = this.buildAuditPayload(txInfo.txHash);
+      const auditPayload = this.buildAuditPayload(
+        txInfo.txHash,
+        candidateSnapshot,
+        verifiedVoterSnapshot,
+        preVoteImageSnapshot
+      );
       localStorage.setItem('pendingVoteAudit', JSON.stringify(auditPayload));
       try {
         await this.saveVoteAudit(auditPayload);
@@ -642,7 +678,10 @@ class VoteConfirmation {
       localStorage.setItem('txStatus', 'failed');
       localStorage.setItem('txError', error?.message || 'Vote failed');
       this.showVoteError(error?.message || 'Vote submission failed');
-      if (finalBtn) finalBtn.disabled = false;
+      if (finalBtn) {
+        finalBtn.disabled = false;
+        finalBtn.textContent = 'Vote Confirm';
+      }
     } finally {
       this.votingInProgress = false;
     }
@@ -680,15 +719,15 @@ class VoteConfirmation {
     return out;
   }
 
-  buildAuditPayload(txHash) {
+  buildAuditPayload(txHash, candidateData, verifiedVoter, preVoteImage) {
     return {
-      voter_id: this.verifiedVoter.voter_id,
-      candidate_id: this.candidateData.id,
-      candidate_name: this.candidateData.name,
-      party: this.candidateData.party,
+      voter_id: verifiedVoter.voter_id,
+      candidate_id: candidateData.id,
+      candidate_name: candidateData.name,
+      party: candidateData.party,
       tx_hash: txHash,
-      pre_vote_image: this.preVoteImage,
-      on_vote_day_image: this.verifiedVoter.on_vote_day_image || null,
+      pre_vote_image: preVoteImage,
+      on_vote_day_image: verifiedVoter.on_vote_day_image || null,
     };
   }
 
@@ -715,6 +754,7 @@ class VoteConfirmation {
   }
 
   cancelVote() {
+    this.clearVoteWindowTimer();
     localStorage.removeItem('selectedCandidate');
     localStorage.removeItem('currentTxHash');
     localStorage.removeItem('txStatus');
