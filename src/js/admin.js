@@ -441,9 +441,9 @@ class AdminTools {
   }
 
   async fetchLiveReport() {
+    const body = byId('liveReportBody');
     try {
       const data = await fetchJson(`${API_BASE}/vote/report`);
-      const body = byId('liveReportBody');
       if (!body) return;
       body.innerHTML = '';
       if (!data.items || data.items.length === 0) {
@@ -463,7 +463,19 @@ class AdminTools {
       }
       setStatus(byId('liveReportMsg'), 'Live report auto-refresh every 4s.');
     } catch (e) {
-      setStatus(byId('liveReportMsg'), `Report error: ${e.message}`, { isError: true });
+      if (body) {
+        body.innerHTML = '<tr><td colspan="5">Blockchain report unavailable. Configure backend RPC and contract address, then restart the API.</td></tr>';
+      }
+      const message = String(e?.message || 'Report error');
+      if (message.includes('VOTING_CONTRACT_ADDRESS') || message.includes('RPC_URL')) {
+        setStatus(
+          byId('liveReportMsg'),
+          'Blockchain report is not configured on the backend. Set RPC_URL and VOTING_CONTRACT_ADDRESS in the backend env, then restart FastAPI.',
+          { isError: true }
+        );
+        return;
+      }
+      setStatus(byId('liveReportMsg'), `Report error: ${message}`, { isError: true });
     }
   }
 

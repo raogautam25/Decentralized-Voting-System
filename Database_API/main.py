@@ -27,7 +27,11 @@ from duplicate_detection import analyze_image_bytes, compute_similarity_score, f
 from sentiment import analyze_feedback, build_sentiment_report
 from vote_prediction import generate_vote_prediction_report
 
-dotenv.load_dotenv()
+BASE_DIR = os.path.dirname(__file__)
+ROOT_DIR = os.path.dirname(BASE_DIR)
+
+dotenv.load_dotenv(os.path.join(BASE_DIR, ".env"), override=False)
+dotenv.load_dotenv(os.path.join(ROOT_DIR, ".env"), override=False)
 
 app = FastAPI()
 
@@ -54,7 +58,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MEDIA_DIR = os.path.join(os.path.dirname(__file__), "media")
+MEDIA_DIR = os.path.join(BASE_DIR, "media")
 os.makedirs(MEDIA_DIR, exist_ok=True)
 app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
 
@@ -210,7 +214,10 @@ def save_image_from_data_url(data_url, prefix):
 
 def rpc_call(method, params):
     if not CHAIN_RPC_URL:
-        raise HTTPException(status_code=503, detail="RPC_URL is not configured")
+        raise HTTPException(
+            status_code=503,
+            detail="Blockchain live report is unavailable because RPC_URL is not configured on the backend.",
+        )
 
     payload = json.dumps(
         {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
@@ -255,7 +262,10 @@ def decode_abi_string(raw_bytes, offset):
 
 def eth_call_contract(data):
     if not CHAIN_CONTRACT_ADDRESS:
-        raise HTTPException(status_code=503, detail="VOTING_CONTRACT_ADDRESS is not configured")
+        raise HTTPException(
+            status_code=503,
+            detail="Blockchain live report is unavailable because VOTING_CONTRACT_ADDRESS is not configured on the backend.",
+        )
     return rpc_call("eth_call", [{"to": CHAIN_CONTRACT_ADDRESS, "data": data}, "latest"])
 
 
