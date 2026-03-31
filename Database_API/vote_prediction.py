@@ -51,12 +51,11 @@ def _predict_final_votes(turnout_points, cumulative_votes, current_vote_count, p
 
 def generate_vote_prediction_report(voters_collection, candidates_collection, vote_report_collection, vote_audit_collection):
     total_registered_voters = voters_collection.count_documents({"role": "user", "is_active": {"$ne": False}})
-    report_rows = list(vote_report_collection.find({}, {"_id": 0, "candidate_id": 1, "candidate_name": 1, "party": 1, "vote_count": 1}))
     audit_rows = list(
         vote_audit_collection.find({}, {"_id": 0, "candidate_id": 1, "candidate_name": 1, "party": 1, "voted_at": 1}).sort("voted_at", 1)
     )
 
-    if not report_rows and not audit_rows:
+    if not audit_rows:
         return {
             "items": [],
             "votes_cast_so_far": 0,
@@ -76,6 +75,8 @@ def generate_vote_prediction_report(voters_collection, candidates_collection, vo
     votes_cast_so_far = len(audit_rows)
     prediction_target = max(int(total_registered_voters), votes_cast_so_far)
     cumulative_by_candidate = {}
+    current_counts = {}
+    names_from_audit = {}
 
     for index, row in enumerate(audit_rows, start=1):
         candidate_id = _safe_int(row.get("candidate_id"), 0)
@@ -84,14 +85,20 @@ def generate_vote_prediction_report(voters_collection, candidates_collection, vo
         cumulative_by_candidate[candidate_id]["running_total"] += 1
         cumulative_by_candidate[candidate_id]["turnout_points"].append(index)
         cumulative_by_candidate[candidate_id]["cumulative_votes"].append(cumulative_by_candidate[candidate_id]["running_total"])
+        current_counts[candidate_id] = current_counts.get(candidate_id, 0) + 1
+        if candidate_id not in names_from_audit:
+            names_from_audit[candidate_id] = {
+                "candidate_name": row.get("candidate_name") or f"Candidate {candidate_id}",
+                "party": row.get("party") or "",
+            }
 
     items = []
     regression_scores = []
 
-    for row in report_rows:
-        candidate_id = _safe_int(row.get("candidate_id"), 0)
-        fallback_meta = candidates_by_id.get(candidate_id, {})
-        current_vote_count = _safe_int(row.get("vote_count"), 0)
+    candidate_ids = sorted(set(candidates_by_id.keys()) | set(current_counts.keys()))
+    for candidate_id in candidate_ids:
+        fallback_meta = candidates_by_id.get(candidate_id, names_from_audit.get(candidate_id, {}))
+        current_vote_count = _safe_int(current_counts.get(candidate_id), 0)
         history = cumulative_by_candidate.get(candidate_id, {"turnout_points": [], "cumulative_votes": []})
         prediction = _predict_final_votes(
             turnout_points=history.get("turnout_points", []),
@@ -106,8 +113,8 @@ def generate_vote_prediction_report(voters_collection, candidates_collection, vo
         items.append(
             {
                 "candidate_id": candidate_id,
-                "candidate_name": row.get("candidate_name") or fallback_meta.get("candidate_name") or f"Candidate {candidate_id}",
-                "party": row.get("party") or fallback_meta.get("party") or "",
+                "candidate_name": fallback_meta.get("candidate_name") or f"Candidate {candidate_id}",
+                "party": fallback_meta.get("party") or "",
                 "current_vote_count": current_vote_count,
                 "predicted_final_vote_count": predicted_final_vote_count,
                 "predicted_vote_share_percent": round((predicted_final_vote_count / prediction_target) * 100, 2) if prediction_target else 0.0,

@@ -3,12 +3,14 @@ import csv
 import datetime
 import glob
 import io
+import json
 import os
 import re
 import secrets
 import string
 import traceback
 import uuid
+from urllib import request as urllib_request
 from urllib.parse import urlparse
 
 import dotenv
@@ -61,6 +63,11 @@ DEFAULT_ELECTION_ID = "default-election"
 VOTER_ID_ALPHABET = string.ascii_uppercase + string.digits
 PRIMARY_ELECTION_CONFIG_ID = "primary"
 LIVE_FACE_VERIFICATION_THRESHOLD = float(os.environ.get("LIVE_FACE_VERIFICATION_THRESHOLD", "0.90"))
+CHAIN_RPC_URL = str(os.environ.get("RPC_URL", "https://ethereum-sepolia-rpc.publicnode.com")).strip()
+CHAIN_CONTRACT_ADDRESS = str(os.environ.get("VOTING_CONTRACT_ADDRESS", "")).strip().lower()
+GET_COUNT_CANDIDATES_SELECTOR = "0x0a84a217"
+GET_CANDIDATE_SELECTOR = "0x35b8e820"
+VOTE_CAST_EVENT_TOPIC = "0xb4cfecf70861b7b150d8337780d34fb4cbc2114b5fb1fe51a5c5fca1849f7274"
 
 mongo_client = None
 mongo_db = None
@@ -123,6 +130,15 @@ def normalize_name(value):
 def normalize_feedback_text(value):
     text = str(value or "").strip()
     return text or None
+
+
+def normalize_address(value):
+    value = str(value or "").strip().lower()
+    if not value:
+        return ""
+    if not value.startswith("0x"):
+        value = f"0x{value}"
+    return value
 
 
 def calculate_age(date_of_birth, today=None):
@@ -192,6 +208,142 @@ def save_image_from_data_url(data_url, prefix):
     return save_image_bytes(image_bytes, mime, prefix)
 
 
+def rpc_call(method, params):
+    if not CHAIN_RPC_URL:
+        raise HTTPException(status_code=503, detail="RPC_URL is not configured")
+
+    payload = json.dumps(
+        {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+    ).encode("utf-8")
+    http_request = urllib_request.Request(
+        CHAIN_RPC_URL,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib_request.urlopen(http_request, timeout=15) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=f"Blockchain RPC request failed: {error}")
+
+    if data.get("error"):
+        raise HTTPException(status_code=502, detail=f"Blockchain RPC error: {data['error']}")
+    return data.get("result")
+
+
+def hex_to_int(value):
+    try:
+        return int(str(value or "0x0"), 16)
+    except Exception:
+        return 0
+
+
+def decode_abi_string(raw_bytes, offset):
+    if offset < 0 or offset + 32 > len(raw_bytes):
+        return ""
+    length = int.from_bytes(raw_bytes[offset:offset + 32], "big")
+    start = offset + 32
+    end = start + length
+    if start < 0 or end > len(raw_bytes):
+        return ""
+    try:
+        return raw_bytes[start:end].decode("utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+
+def eth_call_contract(data):
+    if not CHAIN_CONTRACT_ADDRESS:
+        raise HTTPException(status_code=503, detail="VOTING_CONTRACT_ADDRESS is not configured")
+    return rpc_call("eth_call", [{"to": CHAIN_CONTRACT_ADDRESS, "data": data}, "latest"])
+
+
+def get_onchain_candidate_count():
+    result = eth_call_contract(GET_COUNT_CANDIDATES_SELECTOR)
+    return hex_to_int(result)
+
+
+def get_onchain_candidate(candidate_id):
+    try:
+        candidate_id = int(candidate_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="candidate_id must be an integer")
+
+    call_data = f"{GET_CANDIDATE_SELECTOR}{candidate_id:064x}"
+    raw = str(eth_call_contract(call_data) or "0x")
+    encoded = bytes.fromhex(raw[2:] if raw.startswith("0x") else raw)
+    if len(encoded) < 128:
+        raise HTTPException(status_code=502, detail="Unexpected blockchain candidate response")
+
+    resolved_candidate_id = int.from_bytes(encoded[0:32], "big")
+    name_offset = int.from_bytes(encoded[32:64], "big")
+    party_offset = int.from_bytes(encoded[64:96], "big")
+    vote_count = int.from_bytes(encoded[96:128], "big")
+
+    return {
+        "candidate_id": resolved_candidate_id,
+        "name": decode_abi_string(encoded, name_offset),
+        "party": decode_abi_string(encoded, party_offset),
+        "vote_count": vote_count,
+    }
+
+
+def get_onchain_candidate_results():
+    count = get_onchain_candidate_count()
+    results = []
+    for candidate_id in range(1, count + 1):
+        candidate = get_onchain_candidate(candidate_id)
+        if candidate["candidate_id"]:
+            results.append(candidate)
+    results.sort(key=lambda row: (-row["vote_count"], row["candidate_id"]))
+    return results
+
+
+def verify_vote_tx_hash(tx_hash, expected_candidate_id):
+    clean_hash = str(tx_hash or "").strip()
+    if not clean_hash or not clean_hash.startswith("0x"):
+        raise HTTPException(status_code=400, detail="tx_hash is required and must start with 0x")
+    if not CHAIN_CONTRACT_ADDRESS:
+        raise HTTPException(status_code=503, detail="VOTING_CONTRACT_ADDRESS is not configured")
+
+    receipt = rpc_call("eth_getTransactionReceipt", [clean_hash])
+    if not receipt:
+        raise HTTPException(status_code=409, detail="Transaction receipt not found yet")
+    if str(receipt.get("status", "")).lower() not in {"0x1", "1", "true"}:
+        raise HTTPException(status_code=409, detail="Vote transaction failed on-chain")
+
+    expected_candidate_id = int(expected_candidate_id)
+    contract_address = normalize_address(CHAIN_CONTRACT_ADDRESS)
+    logs = receipt.get("logs") or []
+    for log in logs:
+        if normalize_address(log.get("address")) != contract_address:
+            continue
+        topics = log.get("topics") or []
+        if len(topics) < 3:
+            continue
+        if str(topics[0]).lower() != VOTE_CAST_EVENT_TOPIC:
+            continue
+        candidate_from_log = hex_to_int(topics[2])
+        if candidate_from_log != expected_candidate_id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Vote transaction candidate mismatch. On-chain candidate: {candidate_from_log}, provided: {expected_candidate_id}",
+            )
+        voter_topic = str(topics[1] or "")
+        voter_address = f"0x{voter_topic[-40:]}".lower() if len(voter_topic) >= 42 else ""
+        timestamp = hex_to_int(log.get("data"))
+        return {
+            "tx_hash": clean_hash,
+            "candidate_id": candidate_from_log,
+            "block_number": hex_to_int(receipt.get("blockNumber")),
+            "voter_address": voter_address,
+            "timestamp": timestamp,
+        }
+
+    raise HTTPException(status_code=409, detail="VoteCast event not found for the configured voting contract")
+
+
 def ensure_schema():
     voters = collections["voters"]
     candidates = collections["candidates"]
@@ -227,6 +379,7 @@ def ensure_schema():
 
     vote_audit.create_index([("audit_id", ASCENDING)], unique=True, name="uq_vote_audit_id")
     vote_audit.create_index([("voter_id", ASCENDING)], unique=True, name="uq_vote_audit_voter")
+    vote_audit.create_index([("tx_hash", ASCENDING)], unique=True, sparse=True, name="uq_vote_audit_tx_hash")
     vote_report_live.create_index([("candidate_id", ASCENDING)], unique=True, name="uq_vote_report_candidate")
 
     election_config.update_one(
@@ -571,20 +724,21 @@ async def get_voter_by_qr(qr_token: str):
 
 @app.get("/candidates")
 async def list_candidates():
-    report_by_candidate = {
-        item["candidate_id"]: item
-        for item in coll("vote_report_live").find({}, {"_id": 0, "candidate_id": 1, "vote_count": 1})
-    }
     items = []
+    onchain_votes = {}
+    try:
+        onchain_votes = {item["candidate_id"]: item["vote_count"] for item in get_onchain_candidate_results()}
+    except HTTPException:
+        onchain_votes = {}
+
     for row in coll("candidates").find({}, {"_id": 0}).sort("candidate_id", ASCENDING):
-        report = report_by_candidate.get(row["candidate_id"], {})
         items.append(
             {
                 "candidate_id": int(row["candidate_id"]),
                 "name": row.get("name"),
                 "party": row.get("party"),
                 "symbol": row.get("symbol"),
-                "vote_count": int(report.get("vote_count", 0)),
+                "vote_count": int(onchain_votes.get(row["candidate_id"], 0)),
                 "party_symbol_image": row.get("party_symbol_image"),
                 "date_of_birth": row.get("date_of_birth"),
             }
@@ -1008,6 +1162,8 @@ async def save_vote_audit(request: Request):
                 return {"message": "Vote feedback saved"}
             raise HTTPException(status_code=409, detail="Vote audit already exists for this voter")
 
+        chain_vote = verify_vote_tx_hash(tx_hash, candidate_id)
+
         voted_at = utc_now()
         audit_record = {
             "audit_id": next_sequence("vote_audit"),
@@ -1023,6 +1179,11 @@ async def save_vote_audit(request: Request):
             "on_vote_day_image_mime": on_vote_day_mime,
             "tx_hash": tx_hash,
             "voted_at": voted_at,
+            "chain_verified": True,
+            "chain_candidate_id": chain_vote["candidate_id"],
+            "chain_block_number": chain_vote["block_number"],
+            "chain_voter_address": chain_vote["voter_address"],
+            "chain_timestamp": chain_vote["timestamp"],
         }
         if feedback_details:
             audit_record.update(
@@ -1035,20 +1196,10 @@ async def save_vote_audit(request: Request):
                 }
             )
         coll("vote_audit").insert_one(audit_record)
-        coll("vote_report_live").update_one(
-            {"candidate_id": candidate_id},
-            {
-                "$set": {"candidate_name": candidate_name, "party": party, "updated_at": voted_at},
-                "$inc": {"vote_count": 1},
-                "$setOnInsert": {"rank_position": 0},
-            },
-            upsert=True,
-        )
-        refresh_vote_rankings()
     except HTTPException:
         raise
     except DuplicateKeyError:
-        raise HTTPException(status_code=409, detail="Vote audit already exists for this voter")
+        raise HTTPException(status_code=409, detail="Vote audit or tx_hash already exists")
     except PyMongoError as err:
         print(err)
         raise HTTPException(status_code=500, detail=f"Failed to save vote audit: {err}")
@@ -1062,20 +1213,19 @@ async def save_vote_audit(request: Request):
 
 @app.get("/vote/report")
 async def get_vote_report():
-    rows = coll("vote_report_live").find({}, {"_id": 0}).sort(
-        [("rank_position", ASCENDING), ("vote_count", DESCENDING), ("candidate_id", ASCENDING)]
-    )
+    rows = get_onchain_candidate_results()
     return {
         "items": [
             {
                 "candidate_id": row.get("candidate_id"),
-                "candidate_name": row.get("candidate_name"),
+                "candidate_name": row.get("name") or row.get("candidate_name"),
                 "party": row.get("party"),
                 "vote_count": int(row.get("vote_count", 0)),
-                "rank_position": int(row.get("rank_position", 0)),
-                "updated_at": stringify_datetime(row.get("updated_at")),
+                "rank_position": index,
+                "updated_at": stringify_datetime(utc_now()),
+                "source": "blockchain",
             }
-            for row in rows
+            for index, row in enumerate(rows, start=1)
         ]
     }
 

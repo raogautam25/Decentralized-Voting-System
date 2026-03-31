@@ -505,3 +505,46 @@ npm start
 - FastAPI keeps backend logic modular and deployable on Render.
 - ML reporting adds prediction, sentiment, and anomaly insights without changing the main vote flow.
 - QR plus face verification adds an extra identity check before voting.
+
+## Security Model
+
+### Official vote count source
+
+The official live vote total should be treated as blockchain data, not MongoDB data.
+
+- on-chain vote totals come from [contracts/Voting.sol](./contracts/Voting.sol)
+- public verification pages and explorer pages read blockchain transactions and events
+- MongoDB is used for voter identity, nominations, audit records, exports, and ML-style reporting
+
+Advantage:
+- if someone tampers with MongoDB, they should not be able to change the official on-chain election result
+
+### Current protection in this project
+
+- vote casting is enforced by the smart contract
+- QR token reuse is blocked on-chain
+- audit save now depends on a real successful blockchain transaction hash
+- admin live report is intended to reflect blockchain-based totals
+
+Advantage:
+- database tampering becomes much less useful because the trusted result is no longer the DB counter
+
+### Important security note
+
+If an attacker gets write access to MongoDB, they may still be able to alter:
+
+- voter profile data
+- candidate metadata
+- nomination records
+- audit and ML/reporting data
+
+But they should not be able to forge real blockchain vote totals without controlling actual blockchain transactions.
+
+### Recommended deployment security
+
+- keep MongoDB private and never expose it publicly without strict access control
+- use a dedicated DB user with minimum required permissions
+- use a strong `JWT_SECRET` or `SECRET_KEY`
+- rotate secrets if credentials are leaked
+- back up MongoDB regularly
+- treat blockchain explorer and transaction verification as the final public proof of votes
