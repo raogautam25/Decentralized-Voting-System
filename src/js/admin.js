@@ -27,6 +27,7 @@ class AdminTools {
   constructor() {
     this.stream = null;
     this.photoData = null;
+    this.cardPhotoData = null;
     this.reportTimer = null;
     this.qrImageDataUrl = null;
     this.nominationBound = false;
@@ -61,6 +62,7 @@ class AdminTools {
     byId('regPhotoUpload')?.addEventListener('change', (event) => this.handlePhotoUpload(event));
     byId('registerVoterBtn')?.addEventListener('click', () => this.registerVoter());
     byId('saveQrBtn')?.addEventListener('click', () => this.saveGeneratedQr());
+    byId('downloadVoterCardPdfBtn')?.addEventListener('click', () => this.downloadVoterCardPdf());
     byId('downloadVoteAuditBtn')?.addEventListener('click', () => this.downloadVoteAuditReport());
     byId('clearDatabaseBtn')?.addEventListener('click', () => this.clearDatabaseData());
     byId('loadPredictionBtn')?.addEventListener('click', () => this.loadPredictionReport());
@@ -155,7 +157,7 @@ class AdminTools {
         body: JSON.stringify(payload),
       });
       byId('regGeneratedVoterId').value = data.voter_id || '';
-      this.renderCard(data, payload.photo_data);
+      await this.renderCard(data, payload.photo_data);
       setStatus(byId('registerMsg'), `Voter saved: ${data.voter_id}`, { isBusy: false });
     } catch (e) {
       byId('voterCard').style.display = 'none';
@@ -163,12 +165,89 @@ class AdminTools {
     }
   }
 
-  renderCard(data, photoData) {
+  async prepareCardPhoto(photoData) {
+    if (!photoData) return '';
+
+    const loadImage = () => new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = photoData;
+    });
+
+    try {
+      const img = await loadImage();
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || img.width || 1;
+      canvas.height = img.naturalHeight || img.height || 1;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const { data } = imageData;
+      const borderPixels = [];
+      const step = Math.max(1, Math.floor(Math.min(canvas.width, canvas.height) / 30));
+
+      const pushPixel = (x, y) => {
+        const idx = (y * canvas.width + x) * 4;
+        borderPixels.push([data[idx], data[idx + 1], data[idx + 2]]);
+      };
+
+      for (let x = 0; x < canvas.width; x += step) {
+        pushPixel(x, 0);
+        pushPixel(x, canvas.height - 1);
+      }
+      for (let y = 0; y < canvas.height; y += step) {
+        pushPixel(0, y);
+        pushPixel(canvas.width - 1, y);
+      }
+
+      const bg = borderPixels.reduce((acc, pixel) => {
+        acc[0] += pixel[0];
+        acc[1] += pixel[1];
+        acc[2] += pixel[2];
+        return acc;
+      }, [0, 0, 0]).map((value) => value / Math.max(borderPixels.length, 1));
+
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const luminance = (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
+        const colorDistance = Math.sqrt(
+          ((r - bg[0]) ** 2) +
+          ((g - bg[1]) ** 2) +
+          ((b - bg[2]) ** 2)
+        );
+
+        if (colorDistance < 55 || luminance > 242) {
+          data[i] = 255;
+          data[i + 1] = 255;
+          data[i + 2] = 255;
+        }
+      }
+
+      ctx.putImageData(imageData, 0, 0);
+      const output = document.createElement('canvas');
+      output.width = canvas.width;
+      output.height = canvas.height;
+      const outputCtx = output.getContext('2d');
+      outputCtx.fillStyle = '#ffffff';
+      outputCtx.fillRect(0, 0, output.width, output.height);
+      outputCtx.drawImage(canvas, 0, 0);
+      return output.toDataURL('image/jpeg', 0.95);
+    } catch {
+      return photoData;
+    }
+  }
+
+  async renderCard(data, photoData) {
     byId('voterCard').style.display = 'block';
     byId('cardName').textContent = data.full_name || '';
     byId('cardVoterId').textContent = data.voter_id || '';
     byId('cardDob').textContent = data.date_of_birth || '';
-    byId('cardPhoto').src = photoData;
+    this.cardPhotoData = await this.prepareCardPhoto(photoData);
+    byId('cardPhoto').src = this.cardPhotoData || photoData;
     byId('cardQrToken').textContent = data.qr_token || '';
 
     const qrContainer = byId('cardQr');
@@ -241,6 +320,40 @@ class AdminTools {
     a.click();
     a.remove();
     setStatus(byId('registerMsg'), 'QR saved successfully.');
+  }
+
+  async downloadVoterCardPdf() {
+    const card = byId('voterCard')?.querySelector('.id-card');
+    if (!card || byId('voterCard')?.style?.display === 'none') {
+      setStatus(byId('registerMsg'), 'Generate the voter ID card first.', { isError: true });
+      return;
+    }
+    if (!window.html2canvas || !window.jspdf?.jsPDF) {
+      setStatus(byId('registerMsg'), 'PDF tools are not available right now. Refresh and try again.', { isError: true });
+      return;
+    }
+
+    try {
+      setStatus(byId('registerMsg'), 'Preparing voter ID card PDF...', { isBusy: true });
+      const canvas = await window.html2canvas(card, {
+        scale: 2,
+        backgroundColor: '#ffffff',
+        useCORS: true,
+      });
+      const imageData = canvas.toDataURL('image/png');
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({
+        orientation: canvas.width >= canvas.height ? 'landscape' : 'portrait',
+        unit: 'px',
+        format: [canvas.width, canvas.height],
+      });
+      pdf.addImage(imageData, 'PNG', 0, 0, canvas.width, canvas.height);
+      const voterId = byId('cardVoterId')?.textContent?.trim() || 'voter';
+      pdf.save(`voter_id_card_${voterId}.pdf`);
+      setStatus(byId('registerMsg'), 'Voter ID card PDF downloaded.', { isBusy: false });
+    } catch (e) {
+      setStatus(byId('registerMsg'), `PDF download failed: ${e.message}`, { isError: true, isBusy: false });
+    }
   }
 
   async downloadVoteAuditReport() {
@@ -490,26 +603,6 @@ class AdminTools {
     const summary = byId('mlSentimentSummary');
     if (summary) {
       summary.textContent = `Candidates with feedback: ${Number(data?.candidates_with_feedback || 0)} of ${Number(data?.total_candidates || 0)}.`;
-    }
-  }
-
-  async syncChainToDb() {
-    try {
-      const token = localStorage.getItem('jwtTokenAdmin') || '';
-      if (!token) {
-        setStatus(byId('syncMsg'), 'Admin token missing. Login again.', { isError: true });
-        return;
-      }
-      setStatus(byId('syncMsg'), 'Sync started...', { isBusy: true });
-      const data = await fetchJson(`${FRONTEND_BASE}/admin/sync-chain-to-db?Authorization=Bearer ${token}`, { method: 'POST' });
-      if (!data.ok) throw new Error(data.error || 'Sync failed');
-      setStatus(
-        byId('syncMsg'),
-        `Synced ${data.db_candidates_synced}/${data.chain_candidates} candidates from chain to DB (net ${data.network_id}).`,
-        { isBusy: false }
-      );
-    } catch (e) {
-      setStatus(byId('syncMsg'), `Sync error: ${e.message}`, { isError: true, isBusy: false });
     }
   }
 

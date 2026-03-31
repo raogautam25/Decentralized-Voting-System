@@ -13,7 +13,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@truffle/contract": "^4.6.18",
     "browserify": "^17.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.0.3",
@@ -21,8 +20,5 @@
     "jsonwebtoken": "^9.0.0",
     "mongoose": "^8.12.1",
     "web3": "^1.9.0"
-  },
-  "devDependencies": {
-    "truffle": "^5.11.5"
   }
 }

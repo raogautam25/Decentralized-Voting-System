@@ -37,10 +37,7 @@
         ></iframe>
       </div>
       <p id="nominationMsg"></p>
-      <div class="action-row" style="margin-top: 10px;">
-      </div>
-      <p id="Aday"></p>
-      <p id="syncMsg"></p>
+      <div class="action-row" style="margin-top: 10px;"></div>
     </div>
 
     <div class="container">
@@ -59,7 +56,6 @@
         <button id="restartElectionBtn" type="button">Restart / Reconduct Election</button>
       </div>
       <div id="electionStateSummary" class="election-state-summary" aria-live="polite"></div>
-      <p id="Aday"></p>
       <p id="electionControlMsg"></p>
     </div>
 
@@ -125,6 +121,7 @@
 
         <div class="qr-actions">
           <button id="saveQrBtn" type="button">Save Generated QR</button>
+          <button id="downloadVoterCardPdfBtn" type="button">Download Voter ID Card PDF</button>
         </div>
       </div>
     </div>
@@ -215,6 +212,8 @@
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.0/umd/popper.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="../js/runtime-config.js?v=20260313c"></script>
     <script src="../dist/app.bundle.js?v=20260314a" type="module"></script>
     <script src="../js/admin.js?v=20260313c" type="module"></script>

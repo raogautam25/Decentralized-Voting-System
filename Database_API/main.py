@@ -12,9 +12,8 @@ import uuid
 from urllib.parse import urlparse
 
 import dotenv
-import jwt
 from bson.binary import Binary
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -119,6 +118,11 @@ def stringify_datetime(value):
 
 def normalize_name(value):
     return re.sub(r"\s+", " ", str(value or "").strip()).lower()
+
+
+def normalize_feedback_text(value):
+    text = str(value or "").strip()
+    return text or None
 
 
 def calculate_age(date_of_birth, today=None):
@@ -458,43 +462,9 @@ def refresh_vote_rankings():
         )
 
 
-async def authenticate(request: Request):
-    token = (request.headers.get("authorization") or "").replace("Bearer ", "").strip()
-    if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Forbidden")
-    if not coll("voters").find_one({"voter_id": token}, {"_id": 1}):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Forbidden")
-
-
-async def get_role(voter_id, password):
-    try:
-        voter = coll("voters").find_one(
-            {"voter_id": voter_id, "password": password, "is_active": {"$ne": False}},
-            {"role": 1},
-        )
-    except PyMongoError as err:
-        print(err)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error")
-
-    if not voter:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid voter id or password")
-    return voter.get("role", "user")
-
-
 @app.on_event("startup")
 def startup_event():
     init_mongo()
-
-
-@app.get("/login")
-async def login(voter_id: str, password: str):
-    role = await get_role(voter_id, password)
-    token = jwt.encode(
-        {"password": password, "voter_id": voter_id, "role": role},
-        os.environ.get("SECRET_KEY", "your_super_secret_key"),
-        algorithm="HS256",
-    )
-    return {"token": token, "role": role}
 
 
 @app.post("/admin/voters")
@@ -1010,7 +980,8 @@ async def save_vote_audit(request: Request):
     tx_hash = payload.get("tx_hash")
     pre_vote_image = payload.get("pre_vote_image")
     on_vote_day_image = payload.get("on_vote_day_image")
-    feedback_details = analyze_feedback(payload.get("feedback"))
+    feedback_text = normalize_feedback_text(payload.get("feedback"))
+    feedback_details = analyze_feedback(feedback_text)
 
     pre_vote_blob, pre_vote_mime = decode_image_bytes_from_data_url(pre_vote_image) if pre_vote_image else (None, None)
     on_vote_day_blob, on_vote_day_mime = decode_image_bytes_from_data_url(on_vote_day_image) if on_vote_day_image else (None, None)
@@ -1131,7 +1102,6 @@ async def get_vote_sentiment_report():
 async def get_anomaly_report(request: Request):
     require_admin_role(request, os.environ.get("SECRET_KEY", "your_super_secret_key"))
     return generate_anomaly_report(vote_audit_collection=coll("vote_audit"))
-
 
 @app.get("/admin/vote-audit/export")
 async def export_vote_audit(request: Request):

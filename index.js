@@ -2,7 +2,6 @@ const express = require('express');
 const path = require('path');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
-const { execFile } = require('child_process');
 const mongoose = require('mongoose');
 
 require('dotenv').config();
@@ -374,16 +373,8 @@ app.post('/login', handleLogin);
 app.get('/admin/login', handleLogin);
 app.post('/admin/login', handleLogin);
 
-app.get('/js/login.js', (req, res) => {
-  res.sendFile(path.join(__dirname, 'src/js/login.js'));
-});
-
 app.get('/css/login.css', (req, res) => {
   res.sendFile(path.join(__dirname, 'src/css/login.css'));
-});
-
-app.get('/css/index.css', (req, res) => {
-  res.sendFile(path.join(__dirname, 'src/css/index.css'));
 });
 
 app.get('/css/admin.css', (req, res) => {
@@ -426,10 +417,6 @@ app.get('/candidate-nomination.html', authorizeUser, (req, res) => {
   res.sendFile(path.join(__dirname, 'src/html/candidate_nomination.html'));
 });
 
-app.get('/index.html', authorizeUser, (req, res) => {
-  res.sendFile(path.join(__dirname, 'src/html/index.html'));
-});
-
 app.get('/voter.html', (req, res) => {
   res.redirect(302, '/vote.html');
 });
@@ -454,31 +441,8 @@ app.get('/loading.html', (req, res) => {
   res.sendFile(path.join(__dirname, 'src/html/loading.html'));
 });
 
-app.get('/dist/login.bundle.js', (req, res) => {
-  res.sendFile(path.join(__dirname, 'src/dist/login.bundle.js'));
-});
-
 app.get('/dist/app.bundle.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'src/dist/app.bundle.js'));
-});
-
-app.post('/admin/sync-chain-to-db', authorizeUser, (req, res) => {
-  const scriptPath = path.join(__dirname, 'scripts', 'sync_chain_to_db.js');
-  execFile(process.execPath, [scriptPath], { env: process.env }, (err, stdout, stderr) => {
-    if (stderr) {
-      console.warn('sync stderr:', stderr);
-    }
-    const text = (stdout || '').toString().trim();
-    try {
-      const json = JSON.parse(text || '{}');
-      if (err) {
-        return res.status(500).json(json.ok === false ? json : { ok: false, error: err.message });
-      }
-      return res.json(json);
-    } catch (e) {
-      return res.status(500).json({ ok: false, error: `Sync failed: ${err ? err.message : 'unknown'}`, raw: text });
-    }
-  });
 });
 
 app.all(

@@ -1,433 +1,507 @@
-# Decentralized Voting System Master Reference
+# Decentralized Voting System
+
+This project is a decentralized voting application built around four working parts:
+
+- a Solidity smart contract deployed from Remix
+- MetaMask for wallet-based blockchain transactions
+- a Node/Express server for frontend hosting and login
+- a FastAPI + MongoDB backend for voter data, verification, reports, and exports
+
+The repository is organized so the blockchain remains the source of truth for vote transactions, while MongoDB handles voter identity, QR verification, audit records, nomination data, and admin-side reporting.
+
+## System Flow
+
+1. Admin deploys [Voting.sol](./contracts/Voting.sol) from Remix and sets `VOTING_CONTRACT_ADDRESS`.
+2. Admin starts [main.py](./Database_API/main.py) for MongoDB-backed API services.
+3. Admin starts [index.js](./index.js) to serve the frontend and proxy browser API calls.
+4. Admin logs in, registers voters, adds candidates, and defines election dates.
+5. Voters scan QR, pass face verification, vote using MetaMask, and receive an on-chain transaction hash.
+6. Admin and public users can inspect results, verify transactions, export audit data, and review ML-based reports.
+
+## Runtime Entry Points
+
+### [index.js](./index.js)
+What it does:
+- runs the Express web server
+- serves the active HTML, CSS, JS, bundle, and asset files
+- handles admin login using MongoDB-backed credentials
+- protects admin routes with JWT verification
+- proxies frontend requests to the FastAPI backend
+
+Advantage:
+- keeps the browser setup simple because the frontend talks to one base URL
+- centralizes login and route protection
+- separates UI hosting from the Python API cleanly
+
+### [Database_API/main.py](./Database_API/main.py)
+What it does:
+- runs the FastAPI backend
+- connects to MongoDB and initializes collections/indexes
+- registers voters and generates QR-linked voter IDs
+- handles candidate nomination and election date storage
+- performs QR lookup and live face verification
+- stores vote audit records and image evidence
+- exposes reporting and export endpoints
+
+Advantage:
+- keeps database and verification logic in one service
+- makes Render deployment straightforward
+- allows the frontend to stay thin and mostly UI-focused
+
+### [contracts/Voting.sol](./contracts/Voting.sol)
+What it does:
+- stores candidate data on-chain
+- stores election start/end timestamps on-chain
+- records QR-token-based voting
+- exposes public vote status and candidate result functions
+
+Advantage:
+- makes vote casting tamper-resistant
+- gives public verifiability through blockchain events
+- prevents QR token reuse at contract level
+
+## Root Files
+
+### [package.json](./package.json)
+What it does:
+- defines the Node project
+- lists frontend/server dependencies
+- defines build and start scripts
+
+Advantage:
+- gives a single place to install and run the Node side
+- ensures the browser bundle is rebuilt consistently
+
+### [package-lock.json](./package-lock.json)
+What it does:
+- locks exact Node dependency versions
+
+Advantage:
+- reduces “works on my machine” dependency drift
+- improves reproducible installs
+
+### [render.yaml](./render.yaml)
+What it does:
+- stores Render deployment configuration for the backend
+
+Advantage:
+- makes deployment repeatable
+- reduces manual setup mistakes
+
+### [runtime.txt](./runtime.txt)
+What it does:
+- defines the runtime version expected by deployment tooling
+
+Advantage:
+- helps keep hosted execution closer to local development
+
+### [vercel.json](./vercel.json)
+What it does:
+- maps public routes to the active frontend files
+
+Advantage:
+- supports static-style routing cleanly if Vercel hosting is used
 
-This file is a current, code-derived replacement reference for the repository.
-It is written from the source files that exist now, not from older README text.
+### [nodemon.json](./nodemon.json)
+What it does:
+- controls which files Nodemon ignores in development
 
-Scope:
+Advantage:
+- prevents unnecessary restarts during local work
 
-- Documents the maintained application files and their responsibilities
-- Summarizes page flow, API flow, blockchain flow, and ML helpers
-- Notes generated or legacy files separately so source-of-truth files stay clear
+## Smart Contract Folder
 
-Out of scope:
+### [contracts/Voting.sol](./contracts/Voting.sol)
+What it does:
+- core election contract used by the browser app
 
-- `node_modules/`
-- generated contract artifacts and cache internals except where they affect runtime
-- binary images in `public/` and `Database_API/media/`
+Advantage:
+- this is the main blockchain logic that Remix deploys
 
-## 1. System Summary
+## Build and Script Files
 
-This project combines four major layers:
+### [scripts/generate_runtime_config.js](./scripts/generate_runtime_config.js)
+What it does:
+- reads environment variables
+- writes the runtime browser config file
 
-1. A browser frontend for login, admin control, voting, public verification, and public exploration
-2. A Node.js Express server that serves the UI, protects admin pages, proxies API requests, and seeds admin login data
-3. A FastAPI backend that stores election data in MongoDB and performs voter identity checks
-4. A Solidity voting contract that stores candidates, election dates, and QR-based on-chain vote state
-
-The project also includes ML-assisted reporting:
-
-- sentiment analysis with VADER
-- vote forecasting with `LinearRegression`
-- anomaly detection with `IsolationForest`
-
-## 2. Runtime Architecture
-
-| Layer | Main files | Purpose |
-| --- | --- | --- |
-| Frontend pages | `src/html/*` | Page structure and route targets |
-| Frontend logic | `src/js/*` | Login, admin tools, QR verification, EVM voting, explorer, verifier |
-| Frontend styling | `src/css/*` | Page-level styling |
-| Blockchain browser bundle | `src/js/app.js`, `src/dist/app.bundle.js` | Web3, contract reads/writes, vote verification, explorer reads |
-| Web server | `index.js` | Static hosting, admin auth gate, FastAPI proxy, Mongo-backed admin login |
-| Backend API | `Database_API/main.py` | Mongo persistence, voter registration, face checks, audit, reports |
-| Vision helpers | `Database_API/duplicate_detection.py` | Face detection and similarity scoring |
-| ML helpers | `Database_API/sentiment.py`, `Database_API/vote_prediction.py`, `Database_API/anomaly_detection.py` | Reporting and analysis |
-| Smart contract | `contracts/Voting.sol` | Candidate registry, vote casting, QR vote lock, date window enforcement |
-
-## 3. Main User Flows
-
-### 3.1 Login flow
-
-1. `src/html/login.html` renders the login form.
-2. `src/js/login-page.js` sends credentials to `/login`.
-3. `index.js` authenticates against Mongo-seeded admin users.
-4. Admins are redirected to `/admin.html`.
-5. Voters are redirected to `/vote.html`.
-
-### 3.2 Voter registration flow
-
-1. Admin opens `src/html/admin.html`.
-2. `src/js/admin.js` captures or uploads a face image.
-3. `POST /admin/voters` in `Database_API/main.py` validates age and face quality.
-4. `Database_API/duplicate_detection.py` checks for duplicate or near-duplicate voter faces.
-5. Backend stores voter data, generates a voter ID, and creates a QR token.
-6. Admin UI renders a printable ID card and QR image.
-
-### 3.3 Candidate nomination flow
-
-1. Admin page hosts `src/html/candidate_nomination.html` inside an iframe.
-2. `src/js/candidate_nomination.js` validates the form and checks duplicates via `/admin/candidate-nominations/check`.
-3. The iframe posts a message to the parent admin page.
-4. Parent page uses `window.App` from `src/js/app.js` to call `addCandidate` on-chain.
-5. Backend saves the nomination and candidate metadata in MongoDB.
-
-### 3.4 Voting flow
-
-1. Voter opens `src/html/vote.html`.
-2. `src/js/voter.js` scans QR code, fetches voter details, captures a live image, and confirms the scan with `/voter/confirm-scan`.
-3. `src/js/vote.js` performs a second ready-check face verification through `/voter/ready-check`.
-4. `src/js/app.js` verifies election dates and QR vote status on-chain.
-5. Voter selects a candidate and confirms the vote.
-6. Contract transaction hash is stored in `localStorage`.
-7. `src/html/loading.html` and `src/js/loading.js` wait for confirmation, sync audit data, accept optional feedback, and reset voter state.
-
-### 3.5 Public verification flow
-
-1. `src/html/verify_vote.html` accepts a transaction hash.
-2. `src/js/verify_vote.js` calls `window.App.verifyVoteTransaction`.
-3. `src/js/app.js` reads the transaction, receipt, logs, and candidate metadata from chain.
-4. Result page shows vote status, candidate, party, block, gas, timestamp, and wallet.
-
-### 3.6 Public explorer flow
-
-1. `src/html/explorer.html` loads results and vote events.
-2. `src/js/explorer.js` calls `window.App.getCandidateResults()` and `window.App.getPublicVoteEvents()`.
-3. `src/js/app.js` decodes contract events and enriches them with timestamps and candidate details.
-
-## 4. Browser Storage Keys
-
-The frontend uses `localStorage` heavily for booth-style state handoff:
-
-| Key | Purpose |
-| --- | --- |
-| `jwtTokenAdmin` | Admin session token |
-| `jwtTokenVoter` | Voter session token |
-| `verifiedVoter` | QR-verified and face-verified voter snapshot |
-| `selectedCandidate` | Current selected candidate before final vote |
-| `currentTxHash` | Active blockchain transaction |
-| `txStatus` | `pending`, `confirming`, `confirmed`, or `failed` |
-| `txConfirmations` | Confirmation counter |
-| `blockNumber` | Mined block number |
-| `voteSubmittedTime` | Submission timestamp |
-| `pendingVoteAudit` | Vote audit payload queued for backend sync |
-| `pendingVoteFeedback` | Temporary feedback draft on loading page |
-| `lastTxSummary` | Last completed vote summary for verify page |
-| `lastVoteCompleted` | Marker used to force fresh QR verification next round |
-
-## 5. Backend Collections
-
-`Database_API/main.py` works with these MongoDB collections:
-
-| Collection | Purpose |
-| --- | --- |
-| `voters` | Voter identity, QR token, role, image path |
-| `candidates` | Candidate metadata used by the frontend |
-| `candidate_nominations` | Nomination records and party symbol references |
-| `election_config` | Current election dates, status, reconduct count |
-| `vote_audit` | Vote audit trail, images, tx hash, optional feedback sentiment |
-| `vote_report_live` | Live ranked vote counts |
-| `counters` | Auto-increment style sequence values |
-
-## 6. API Surface
-
-### Public or voter-facing endpoints
-
-| Endpoint | Method | Purpose |
-| --- | --- | --- |
-| `/login` | `GET` | Role lookup and JWT creation |
-| `/voter/by-qr` | `GET` | Load voter record by QR token |
-| `/candidates` | `GET` | Candidate list with live vote counts |
-| `/election/dates` | `GET` | Current election state |
-| `/voter/confirm-scan` | `POST` | First live-face verification after QR scan |
-| `/voter/ready-check` | `POST` | Second live-face verification before voting |
-| `/vote/audit` | `POST` | Save vote audit or later feedback |
-| `/vote/report` | `GET` | Ranked live results from backend DB |
-| `/vote/prediction` | `GET` | ML forecast report |
-| `/vote/sentiment-report` | `GET` | Candidate sentiment summary |
-
-### Admin-focused endpoints
-
-| Endpoint | Method | Purpose |
-| --- | --- | --- |
-| `/admin/voters` | `POST` | Register voter with face duplicate detection |
-| `/admin/candidates` | `POST` | Upsert candidate metadata |
-| `/admin/candidate-nominations/keys` | `GET` | Fetch nomination identifiers for duplicate checks |
-| `/admin/candidate-nominations/check` | `POST` | Validate nomination before save |
-| `/admin/candidate-nominations` | `POST` | Save nomination record |
-| `/admin/election/dates` | `POST` | Save election date window |
-| `/admin/election/stop` | `POST` | Stop election |
-| `/admin/election/restart` | `POST` | Restart or reconduct election |
-| `/admin/anomaly-report` | `GET` | Admin-only anomaly report, JWT required |
-| `/admin/vote-audit/export` | `GET` | CSV export |
-| `/admin/vote-audit/image/{audit_id}` | `GET` | Serve stored audit image blob |
-| `/admin/database/clear` | `POST` | Clear Mongo records and media files |
-
-## 7. Smart Contract Summary
-
-`contracts/Voting.sol` stores:
-
-- candidates by integer ID
-- wallet vote status in `voters`
-- QR-hash vote status in `votedQrTokens`
-- election start and end timestamps
-
-Main functions:
-
-- `addCandidate(string name, string party)`
-- `vote(uint candidateID)`
-- `voteByQr(uint candidateID, string qrToken)`
-- `checkVote()`
-- `checkVoteByQr(string qrToken)`
-- `setDates(uint256 start, uint256 end)`
-- `getDates()`
-- `getCandidate(uint candidateID)`
-- `getCountCandidates()`
-
-Main events:
-
-- `CandidateAdded`
-- `Voted`
-- `VotedByQr`
-- `VoteCast`
-- `DatesSet`
-
-Important contract behavior:
-
-- date window enforced on-chain
-- candidate ID bounds enforced on-chain
-- QR token reuse blocked on-chain
-- vote events remain public even if backend data is later cleared
-
-## 8. File-by-File Reference
-
-### 8.1 Root files
-
-| File | Responsibility |
-| --- | --- |
-| `package.json` | Defines Node scripts: `start`, `dev`, `build`, `build:app`. Declares Express, Web3, Truffle Contract, JWT, Mongoose, Browserify. |
-| `package-lock.json` | Locked Node dependency tree. |
-| `index.js` | Main Express app. Serves frontend assets, protects admin routes with JWT, connects to MongoDB, seeds default admin, proxies selected routes to FastAPI, exposes `/healthz`, and runs the chain-to-DB sync script. |
-| `README.md` | Older top-level documentation file currently present in the repository history but deleted in the working tree. |
-| `PAGES.md` | Older page-focused documentation file currently present in the repository history but deleted in the working tree. |
-| `all.md` | This consolidated master reference. |
-| `.env` | Local environment file for Mongo, blockchain, admin credentials, and API config. |
-| `.gitignore` | Git ignore rules. |
-| `nodemon.json` | Development reload config for Node server. |
-| `render.yaml` | Render deployment for the FastAPI service from `Database_API/`. |
-| `runtime.txt` | Python runtime version for Render-style deployment. |
-| `vercel.json` | Vercel rewrites for serving frontend files directly. |
-| `truffle-config.js` | Truffle network config for local Ganache-style development. |
-| `check_networks.py` | Small helper script that prints deployed contract addresses from a hardcoded artifact path. Useful as a local diagnostic, not part of runtime. |
-
-### 8.2 `scripts/`
-
-| File | Responsibility |
-| --- | --- |
-| `scripts/generate_runtime_config.js` | Reads env vars and writes `src/js/runtime-config.js` with API base, RPC URL, chain ID, and contract address. |
-| `scripts/sync_chain_to_db.js` | Reads on-chain candidates and dates from deployed contract and posts them into backend DB endpoints. |
-
-### 8.3 `contracts/` and `migrations/`
-
-| File | Responsibility |
-| --- | --- |
-| `contracts/Voting.sol` | Core smart contract. |
-| `contracts/Migrations.sol` | Standard Truffle migrations contract. |
-| `contracts/2_deploy_contracts.js` | Deploys `Voting.sol` through Truffle. |
-| `migrations/1_initial_migration.js` | Deploys the standard `Migrations` contract. |
-
-### 8.4 `Database_API/`
-
-| File | Responsibility |
-| --- | --- |
-| `Database_API/main.py` | FastAPI application. Handles schema init, Mongo connection, voter registration, candidate nomination, election state, live verification, audit storage, exports, and report endpoints. |
-| `Database_API/duplicate_detection.py` | OpenCV-based face analysis. Detects frontal/profile faces, extracts features, compares images, and returns similarity scores. Used both for duplicate registration checks and live verification. |
-| `Database_API/sentiment.py` | VADER-based feedback scoring. Produces positive/neutral/negative labels and aggregate candidate sentiment reports. |
-| `Database_API/vote_prediction.py` | Uses current vote history to forecast final counts, winner, turnout progress, and confidence. |
-| `Database_API/anomaly_detection.py` | Builds rolling vote-rate windows and uses `IsolationForest` to flag suspicious spikes. Also contains JWT admin-role validation helper. |
-| `Database_API/requirements.txt` | Python dependencies for the API and ML features. |
-| `Database_API/runtime.txt` | Python runtime file for backend deployment. |
-| `Database_API/media/*` | Saved voter photos, scan images, and party symbol images. Runtime/generated content, not source. |
-| `Database_API/__pycache__/*` | Python bytecode cache. Generated, not source. |
-
-### 8.5 `Database_API/main.py` endpoint map
-
-Important helper areas inside `main.py`:
-
-- Mongo URI normalization and DB name resolution
-- date parsing and age validation
-- image decoding and file save helpers
-- index creation in `ensure_schema()`
-- vote rank refresh in `refresh_vote_rankings()`
-- duplicate voter search in `find_existing_voter_duplicate()`
-- live face verification in `verify_live_face_against_voter()`
-
-Important behavior details:
-
-- admin user is mirrored into the `voters` collection during schema setup
-- election stop is enforced before QR lookup, scan confirmation, ready-check, and vote audit
-- `vote_audit` enforces one record per voter, but a second call with only feedback updates the existing record
-- audit export exposes image URLs through `/admin/vote-audit/image/{audit_id}`
-- clearing the database also deletes files inside `Database_API/media/` and recreates schema defaults
-
-### 8.6 `src/html/`
-
-| File | Responsibility |
-| --- | --- |
-| `src/html/login.html` | Entry page with login form and runtime-config/login script includes. |
-| `src/html/admin.html` | Admin portal layout. Contains voter registration UI, election controls, live reports, ML report tables, and the nomination iframe. |
-| `src/html/candidate_nomination.html` | Standalone nomination form UI used inside the admin iframe. |
-| `src/html/vote.html` | Main combined voter page: QR verification, election banner, EVM-style candidate rows, and cancel/message area. |
-| `src/html/loading.html` | Vote processing screen with tx hash, confirmation progress, optional feedback form, and retry state. |
-| `src/html/verify_vote.html` | Public receipt checker by tx hash. |
-| `src/html/explorer.html` | Public results and vote-event explorer. |
-| `src/html/index.html` | Legacy chain-driven voting page still kept for compatibility. |
-| `src/html/voter.html` | Older QR + EVM voter dashboard; Express now redirects `/voter.html` to `/vote.html`. |
-
-### 8.7 `src/js/`
-
-| File | Responsibility |
-| --- | --- |
-| `src/js/config.js` | Exposes `API_BASE` and `FRONTEND_BASE` from runtime config or current origin. |
-| `src/js/runtime-config.js` | Generated file consumed by browser modules. Not hand-edited. |
-| `src/js/utils.js` | Shared DOM helpers, JSON parsing, HTTP wrapper, status messaging, and file download helper. |
-| `src/js/login.js` | Duplicate login implementation; functionally similar to `login-page.js`. |
-| `src/js/login-page.js` | Active login form logic used by `login.html`. |
-| `src/js/admin.js` | Admin dashboard controller. Handles camera/photo capture, voter registration, QR save, election stop/restart, live report polling, ML report loading, DB clear, and nomination iframe messaging. |
-| `src/js/candidate_nomination.js` | Validates form fields, handles independent-candidate logic, party symbol preview/upload, duplicate checks, parent-window blockchain messaging, and final nomination save. |
-| `src/js/app.js` | Browser blockchain layer. Initializes provider, switches network, loads contract, verifies tx receipts, reads public events, reads candidates, writes dates, adds candidates, checks QR vote state, and sends vote transactions. |
-| `src/js/voter.js` | QR verification controller. Manages scanner backends, live camera capture, stale state cleanup, QR lookup, first face match, and verification persistence. |
-| `src/js/vote.js` | Final vote controller. Watches verified voter state, performs ready-check face capture, enforces election stop/QR-voted guards, renders EVM rows, captures pre-vote image, submits vote via `window.App`, and stages audit payload for loading page sync. |
-| `src/js/loading.js` | Polls RPC or injected provider for transaction confirmation, syncs pending audit, records last tx summary, accepts optional feedback, and resets booth state. |
-| `src/js/verify_vote.js` | Reads a tx hash from query/local storage/input and renders the verification receipt. |
-| `src/js/explorer.js` | Loads public results and latest vote events and renders explorer tables. |
-
-### 8.8 `src/css/`
-
-| File | Responsibility |
-| --- | --- |
-| `src/css/login.css` | Login page styling. |
-| `src/css/admin.css` | Admin portal styling, tables, registration card, ML report layout. |
-| `src/css/candidate_nomination.css` | Government-form style for nomination page with floating labels and alerts. |
-| `src/css/vote.css` | Main combined voting page styling, QR verification section, EVM machine layout, status states. |
-| `src/css/loading.css` | Vote-processing screen styling, progress bar, feedback panel, error state. |
-| `src/css/public_verifier.css` | Shared styling for verify and explorer pages. |
-| `src/css/index.css` | Legacy `index.html` styles. |
-| `src/css/voter.css` | Legacy `voter.html` styles. |
-
-### 8.9 Generated frontend output
-
-| File | Responsibility |
-| --- | --- |
-| `src/dist/app.bundle.js` | Browserify bundle generated from `src/js/app.js`. Runtime artifact. |
-| `src/dist/login.bundle.js` | Older bundled login artifact. Runtime artifact. |
-| `client/dist/*` | Separate built frontend output kept in repo. Not the main source used by Express routes. |
-
-### 8.10 Blockchain artifacts and caches
-
-| Path | Responsibility |
-| --- | --- |
-| `build/contracts/*` | Truffle contract artifacts consumed by browser bundle and scripts. |
-| `artifacts/*` | Additional contract build output. |
-| `cache/*` | Solidity cache data. |
-
-### 8.11 Public assets
-
-| Path | Responsibility |
-| --- | --- |
-| `public/favicon.ico` | Site favicon. |
-| `public/*.png` and `public/*.jpg` | Screenshot assets. |
-| `src/assets/eth5.jpg` | Frontend image asset. |
-
-## 9. Notable Implementation Details
-
-### 9.1 Authentication split
-
-There are two login paths in the repo:
-
-- Express `index.js` handles active login used by the frontend and seeds admin data in Mongo
-- FastAPI `Database_API/main.py` still exposes `/login` using `voters` collection credentials
-
-In the current frontend, login goes through the Express layer.
-
-### 9.2 Face verification strategy
-
-`Database_API/duplicate_detection.py` does more than a simple hash compare. It combines:
-
-- frontal and profile Haar cascade detection
-- CLAHE normalization
-- average hash
-- grayscale histogram
-- LBP histogram
-- HOG descriptor
-- edge histogram
-- optional ORB descriptor matching
-
-This is used both for:
-
-- registration-time duplicate detection
-- live scan and ready-check validation
-
-### 9.3 Vote audit strategy
-
-Audit records can contain:
-
-- voter ID
-- candidate ID and name
-- party
-- pre-vote image
-- on-vote-day image
-- tx hash
-- vote timestamp
-- optional feedback and sentiment score
-
-The DB report and the blockchain report are intentionally separate:
-
-- backend DB gives administrative reporting and exports
-- blockchain explorer gives immutable public event history
-
-### 9.4 Election restart behavior
-
-Restarting with `reset_results=true` clears backend vote audit and live report data, but does not reset the smart contract.
-For a truly fresh on-chain election, the contract must be redeployed.
-
-## 10. Environment Variables
-
-| Variable | Purpose |
-| --- | --- |
-| `MONGODB_URI` or `MONGO_URI` | Mongo connection string |
-| `MONGO_DB_NAME` and related DB vars | Explicit DB name override |
-| `SECRET_KEY` or `JWT_SECRET` | JWT signing secret |
-| `ADMIN_USERNAME` | Seeded admin username |
-| `ADMIN_PASSWORD` | Seeded admin password |
-| `ADMIN_FULL_NAME` | Seeded admin full name |
-| `CHAIN_ID` | Required blockchain network ID |
-| `RPC_URL` | RPC URL for browser and scripts |
-| `VOTING_CONTRACT_ADDRESS` | Contract address override used by frontend |
-| `DATABASE_API_BASE`, `FASTAPI_BASE`, or `API_BASE` | Express proxy target |
-| `FRONTEND_API_BASE` | Browser API base override injected into runtime config |
-| `FRONTEND_URL` | Allowed frontend origin |
-| `CORS_ALLOWED_ORIGINS` | Extra allowed CORS origins |
-| `LIVE_FACE_VERIFICATION_THRESHOLD` | Threshold for vote-time live face matching |
-| `FACE_MATCH_THRESHOLD` | Threshold for registration duplicate matching |
-| `REQUIRE_MONGO_ON_STARTUP` | Controls whether Express refuses to boot without Mongo |
-| `MONGO_SERVER_SELECTION_TIMEOUT_MS` | Mongo connection timeout |
-
-## 11. Commands
-
-| Command | Effect |
-| --- | --- |
-| `npm install` | Install Node dependencies |
-| `pip install -r Database_API\\requirements.txt` | Install Python dependencies |
-| `npm start` | Generate runtime config, bundle `app.js`, start Express |
-| `npm run dev` | Same build steps plus `nodemon` |
-| `npm run build` | Generate runtime config and bundle browser app |
-| `node scripts\\sync_chain_to_db.js` | Sync chain candidates and dates to backend DB |
-| `python Database_API\\main.py` | Start FastAPI locally via embedded `uvicorn.run` |
-| `npx truffle migrate --reset --network development` | Local contract deployment |
-
-## 12. Current Source-of-Truth Notes
-
-- The maintained runtime entrypoints are `index.js`, `Database_API/main.py`, `contracts/Voting.sol`, and the files under `src/`.
-- `src/html/index.html`, `src/html/voter.html`, `src/css/index.css`, and `src/css/voter.css` are legacy/compatibility surfaces.
-- `src/js/login.js` and `src/js/login-page.js` are near-duplicates; `login.html` currently loads `login-page.js`.
-- `README.md` and `PAGES.md` are currently deleted in the working tree, so `all.md` is the safest up-to-date consolidated reference.
+Advantage:
+- avoids hardcoding API base URL, RPC URL, chain ID, and contract address in frontend source
+- makes deployment configuration much easier
+
+### [build/contracts/Voting.json](./build/contracts/Voting.json)
+What it does:
+- stores the compiled ABI and network metadata for the contract
+
+Advantage:
+- gives the browser app the ABI it needs to call contract functions
+- avoids duplicating ABI definitions by hand
+
+## Backend Files: `Database_API/`
+
+### [Database_API/main.py](./Database_API/main.py)
+What it does:
+- main API server and MongoDB integration layer
+
+Advantage:
+- acts as the operational center of the backend
+
+### [Database_API/duplicate_detection.py](./Database_API/duplicate_detection.py)
+What it does:
+- analyzes uploaded face images
+- detects duplicate or near-duplicate voter photos
+- compares live photos against registered voter photos
+
+Advantage:
+- prevents the same person from being registered multiple times
+- strengthens the voter verification flow before vote access
+
+### [Database_API/sentiment.py](./Database_API/sentiment.py)
+What it does:
+- scores feedback text using sentiment analysis
+- builds candidate-wise sentiment summaries
+
+Advantage:
+- gives admins quick insight into voter experience and candidate perception
+- turns free-text feedback into reportable data
+
+### [Database_API/vote_prediction.py](./Database_API/vote_prediction.py)
+What it does:
+- estimates likely final vote totals from current voting progress
+- calculates trend slope, confidence, and predicted winner
+
+Advantage:
+- gives a simple forecasting layer for admin monitoring
+- helps interpret incomplete election data while voting is still ongoing
+
+### [Database_API/anomaly_detection.py](./Database_API/anomaly_detection.py)
+What it does:
+- scans vote activity windows for unusual spikes
+- protects the anomaly report with admin JWT checks
+
+Advantage:
+- helps detect suspicious bursts of vote activity
+- adds a basic monitoring/control layer without changing the voting flow
+
+### [Database_API/requirements.txt](./Database_API/requirements.txt)
+What it does:
+- lists Python dependencies for FastAPI, MongoDB, OpenCV, and ML/reporting
+
+Advantage:
+- makes backend setup predictable
+- documents the backend technology stack clearly
+
+### [Database_API/runtime.txt](./Database_API/runtime.txt)
+What it does:
+- pins backend runtime expectations
+
+Advantage:
+- improves deployment consistency
+
+### `Database_API/media/`
+What it does:
+- stores generated voter photos, scan photos, and uploaded symbol images
+
+Advantage:
+- keeps image evidence accessible for audit and admin review
+
+### `Database_API/__pycache__/`
+What it does:
+- stores Python bytecode cache
+
+Advantage:
+- speeds repeated local execution
+
+### `Database_API/.venv/`
+What it does:
+- local Python virtual environment
+
+Advantage:
+- isolates backend dependencies from the global Python install
+
+## Frontend HTML Files: `src/html/`
+
+### [src/html/login.html](./src/html/login.html)
+What it does:
+- renders the login page for admin and voter entry
+
+Advantage:
+- creates a single controlled entry point into the system
+
+### [src/html/admin.html](./src/html/admin.html)
+What it does:
+- renders the admin dashboard
+- includes voter registration, election controls, live reports, ML reports, and voter card export actions
+
+Advantage:
+- gives admins one place to manage the full election workflow
+
+### [src/html/candidate_nomination.html](./src/html/candidate_nomination.html)
+What it does:
+- renders the candidate nomination form used inside the admin page iframe
+
+Advantage:
+- keeps candidate nomination isolated and easier to manage
+
+### [src/html/vote.html](./src/html/vote.html)
+What it does:
+- renders the voter-facing vote page
+- includes QR scanning, verification, and candidate selection UI
+
+Advantage:
+- combines verification and voting into one guided experience
+
+### [src/html/loading.html](./src/html/loading.html)
+What it does:
+- shows transaction progress after a vote is submitted
+- supports post-vote feedback while waiting for confirmation
+
+Advantage:
+- improves user trust by showing transaction status instead of a blank wait
+
+### [src/html/verify_vote.html](./src/html/verify_vote.html)
+What it does:
+- renders the public transaction verification page
+
+Advantage:
+- supports transparency and public confidence in the voting process
+
+### [src/html/explorer.html](./src/html/explorer.html)
+What it does:
+- renders on-chain results and public vote event history
+
+Advantage:
+- gives a public blockchain-style explorer without exposing admin controls
+
+## Frontend JavaScript Files: `src/js/`
+
+### [src/js/app.js](./src/js/app.js)
+What it does:
+- initializes Web3 and MetaMask connectivity
+- loads the contract ABI and address
+- reads candidates, dates, results, and vote events
+- sends candidate creation, date-setting, and voting transactions
+- verifies transaction hashes against chain data
+
+Advantage:
+- keeps all blockchain logic in one reusable browser module
+- reduces duplication across admin, vote, verifier, and explorer pages
+
+### [src/js/admin.js](./src/js/admin.js)
+What it does:
+- runs the admin dashboard behavior
+- registers voters and generates voter cards
+- downloads QR and voter ID card PDF
+- loads live reports and ML reports
+- handles election stop/restart controls
+- coordinates candidate nomination iframe messages
+
+Advantage:
+- centralizes admin-side browser behavior
+- keeps the admin page interactive without moving logic into inline HTML
+
+### [src/js/candidate_nomination.js](./src/js/candidate_nomination.js)
+What it does:
+- validates candidate nomination form input
+- checks duplicates before save
+- passes approved on-chain candidate creation requests to the parent admin page
+
+Advantage:
+- reduces bad nomination data before it reaches the backend or contract
+
+### [src/js/login-page.js](./src/js/login-page.js)
+What it does:
+- submits login credentials
+- stores JWT tokens in localStorage
+- redirects users by role
+
+Advantage:
+- keeps login flow simple and role-aware
+
+### [src/js/voter.js](./src/js/voter.js)
+What it does:
+- runs QR scanning
+- fetches voter data by QR token
+- captures live image for initial verification
+
+Advantage:
+- prevents unauthorized voting before the EVM-style interface is enabled
+
+### [src/js/vote.js](./src/js/vote.js)
+What it does:
+- handles final vote readiness check
+- submits the vote transaction through MetaMask
+- stores pending audit data for confirmation stage
+
+Advantage:
+- separates vote submission logic from scan/verification logic
+- makes the final vote process easier to reason about
+
+### [src/js/loading.js](./src/js/loading.js)
+What it does:
+- monitors blockchain transaction confirmation
+- syncs pending audit data to the backend
+- handles optional feedback save
+- resets voter session state for the next voter
+
+Advantage:
+- prevents half-finished vote sessions
+- improves reliability between blockchain confirmation and backend audit save
+
+### [src/js/verify_vote.js](./src/js/verify_vote.js)
+What it does:
+- verifies a transaction hash and renders receipt details
+
+Advantage:
+- gives users a direct self-service proof check
+
+### [src/js/explorer.js](./src/js/explorer.js)
+What it does:
+- loads candidate result data and recent vote events
+
+Advantage:
+- supports a transparent public election dashboard
+
+### [src/js/config.js](./src/js/config.js)
+What it does:
+- exposes frontend runtime config values
+
+Advantage:
+- keeps shared config logic small and reusable
+
+### [src/js/runtime-config.js](./src/js/runtime-config.js)
+What it does:
+- stores generated browser runtime settings
+
+Advantage:
+- lets the same frontend code run in different environments without manual edits
+
+### [src/js/utils.js](./src/js/utils.js)
+What it does:
+- contains shared helper functions for DOM lookup, API requests, status messages, and downloads
+
+Advantage:
+- avoids repeated boilerplate across frontend modules
+
+## Frontend CSS Files: `src/css/`
+
+### [src/css/login.css](./src/css/login.css)
+What it does:
+- styles the login page
+
+Advantage:
+- keeps the entry screen clear and focused
+
+### [src/css/admin.css](./src/css/admin.css)
+What it does:
+- styles the admin dashboard, voter card, action buttons, and report sections
+
+Advantage:
+- keeps a large admin page organized and readable
+
+### [src/css/candidate_nomination.css](./src/css/candidate_nomination.css)
+What it does:
+- styles the nomination form
+
+Advantage:
+- improves data-entry usability for admins
+
+### [src/css/vote.css](./src/css/vote.css)
+What it does:
+- styles the voter page, QR scan area, and EVM-style voting layout
+
+Advantage:
+- makes the actual vote experience clearer and more controlled
+
+### [src/css/loading.css](./src/css/loading.css)
+What it does:
+- styles the transaction confirmation page
+
+Advantage:
+- makes pending/confirmed/error states easier to understand
+
+### [src/css/public_verifier.css](./src/css/public_verifier.css)
+What it does:
+- styles the public verification and explorer pages
+
+Advantage:
+- keeps public-facing transparency pages visually consistent
+
+## Assets and Generated Output
+
+### [src/assets/eth5.jpg](./src/assets/eth5.jpg)
+What it does:
+- provides the background image used by parts of the frontend
+
+Advantage:
+- gives the interface a distinct identity
+
+### [src/dist/app.bundle.js](./src/dist/app.bundle.js)
+What it does:
+- browserified bundle generated from [src/js/app.js](./src/js/app.js)
+
+Advantage:
+- allows CommonJS-style frontend blockchain code to run in the browser
+
+## Environment Variables
+
+Required variables:
+
+- `MONGODB_URI` or `MONGO_URI`: MongoDB connection string
+- `JWT_SECRET` or `SECRET_KEY`: JWT signing secret
+- `ADMIN_USERNAME`: admin login username
+- `ADMIN_PASSWORD`: admin login password
+- `ADMIN_FULL_NAME`: admin display name
+- `CHAIN_ID`: blockchain network ID expected by the frontend
+- `RPC_URL`: RPC endpoint used by the browser logic
+- `VOTING_CONTRACT_ADDRESS`: Remix-deployed contract address
+- `DATABASE_API_BASE` or `API_BASE`: backend API base URL
+
+Useful optional variables:
+
+- `FRONTEND_URL`: explicit frontend origin for CORS
+- `CORS_ALLOWED_ORIGINS`: extra allowed origins
+- `LIVE_FACE_VERIFICATION_THRESHOLD`: match threshold for vote-time face verification
+- `MONGO_SERVER_SELECTION_TIMEOUT_MS`: MongoDB timeout tuning
+- `REQUIRE_MONGO_ON_STARTUP`: whether Express should refuse startup without MongoDB
+
+## Commands
+
+### Install Node dependencies
+
+```powershell
+npm install
+```
+
+### Install Python dependencies
+
+```powershell
+Database_API\.venv\Scripts\python.exe -m pip install -r Database_API\requirements.txt
+```
+
+### Build frontend runtime bundle
+
+```powershell
+npm run build
+```
+
+### Start backend
+
+```powershell
+python Database_API\main.py
+```
+
+### Start frontend/server
+
+```powershell
+npm start
+```
+
+## Main Advantages of This Architecture
+
+- Blockchain voting remains publicly verifiable and harder to tamper with.
+- MongoDB handles identity, nomination, reporting, and audit tasks that do not belong on-chain.
+- Express keeps frontend delivery and login simple.
+- FastAPI keeps backend logic modular and deployable on Render.
+- ML reporting adds prediction, sentiment, and anomaly insights without changing the main vote flow.
+- QR plus face verification adds an extra identity check before voting.

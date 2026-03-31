@@ -691,7 +691,7 @@ class VoteConfirmation {
     // Supports multiple return shapes:
     // - web3 receipt: { transactionHash, blockNumber, ... }
     // - tx hash string: "0x..."
-    // - truffle-contract result: { tx, receipt: { transactionHash, blockNumber, ... }, ... }
+    // - wrapped transaction result: { tx, receipt: { transactionHash, blockNumber, ... }, ... }
     // - nested receipt: { receipt: { transactionHash } }
     const out = { txHash: '', blockNumber: '' };
 

@@ -124,7 +124,6 @@ button:active {
   transform: translateY(1px);
 }
 
-#Aday,
 #registerMsg,
 #liveReportMsg,
 #electionControlMsg,
@@ -363,9 +362,12 @@ button:active {
   margin-top: 10px;
   display: flex;
   justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
-#saveQrBtn {
+#saveQrBtn,
+#downloadVoterCardPdfBtn {
   min-width: 200px;
 }
 

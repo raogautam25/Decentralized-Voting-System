@@ -1,7 +1,4 @@
-from __future__ import annotations
-
 import datetime
-import math
 
 import jwt
 import numpy as np
@@ -9,181 +6,114 @@ from fastapi import HTTPException, status
 from sklearn.ensemble import IsolationForest
 
 
-def _utc_datetime(value):
+def require_admin_role(request, secret_key):
+    auth_header = str(request.headers.get("authorization") or "").strip()
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin authorization required")
+
+    token = auth_header.split(" ", 1)[1].strip()
+    try:
+        payload = jwt.decode(token, secret_key, algorithms=["HS256"])
+    except Exception as error:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid admin token: {error}")
+
+    if str(payload.get("role") or "").lower() != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+    return payload
+
+
+def _to_utc(value):
     if isinstance(value, datetime.datetime):
         if value.tzinfo is None:
             return value.replace(tzinfo=datetime.timezone.utc)
         return value.astimezone(datetime.timezone.utc)
-    if isinstance(value, str):
-        normalized = value.strip().replace("Z", "+00:00")
-        try:
-            parsed = datetime.datetime.fromisoformat(normalized)
-            if parsed.tzinfo is None:
-                return parsed.replace(tzinfo=datetime.timezone.utc)
-            return parsed.astimezone(datetime.timezone.utc)
-        except Exception:
-            return None
     return None
 
 
-def _utc_iso(value):
-    if value is None:
-        return None
-    return value.astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def require_admin_role(request, secret_key):
-    authorization = (request.headers.get("authorization") or "").strip()
-    if not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin token is required")
-
-    token = authorization.split(" ", 1)[1].strip()
-    if not token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin token is required")
-
-    try:
-        payload = jwt.decode(token, secret_key, algorithms=["HS256"])
-    except jwt.PyJWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-
-    if str(payload.get("role") or "").strip().lower() != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
-
-    return payload
-
-
-def _build_rolling_windows(timestamps, window_minutes):
-    window_seconds = max(60, int(window_minutes) * 60)
-    windows = []
-
-    for index, start_at in enumerate(timestamps):
-        end_at = start_at + datetime.timedelta(seconds=window_seconds)
-        bucket = []
-        probe = index
-        while probe < len(timestamps) and timestamps[probe] < end_at:
-            bucket.append(timestamps[probe])
-            probe += 1
-
-        vote_count = len(bucket)
-        if vote_count <= 0:
-            continue
-
-        span_seconds = (bucket[-1] - bucket[0]).total_seconds() if vote_count > 1 else 0.0
-        average_gap_seconds = span_seconds / (vote_count - 1) if vote_count > 1 else float(window_seconds)
-
-        windows.append(
-            {
-                "window_start_dt": start_at,
-                "window_end_dt": end_at,
-                "vote_count": vote_count,
-                "rate_per_minute": round(vote_count / max(float(window_minutes), 1.0), 4),
-                "average_gap_seconds": round(float(average_gap_seconds), 2),
-            }
-        )
-
-    return windows
-
-
-def _merge_windows(windows):
-    if not windows:
-        return []
-
-    windows = sorted(windows, key=lambda item: item["window_start_dt"])
-    merged = [windows[0].copy()]
-
-    for window in windows[1:]:
-        current = merged[-1]
-        if window["window_start_dt"] <= current["window_end_dt"]:
-            current["window_end_dt"] = max(current["window_end_dt"], window["window_end_dt"])
-            current["vote_count"] = max(current["vote_count"], window["vote_count"])
-            current["rate_per_minute"] = max(current["rate_per_minute"], window["rate_per_minute"])
-            current["average_gap_seconds"] = min(current["average_gap_seconds"], window["average_gap_seconds"])
-            current["anomaly_score"] = min(current["anomaly_score"], window["anomaly_score"])
-            continue
-        merged.append(window.copy())
-
-    return merged
+def _window_to_item(window):
+    return {
+        "window_start": window["window_start"].isoformat().replace("+00:00", "Z"),
+        "window_end": window["window_end"].isoformat().replace("+00:00", "Z"),
+        "vote_count": window["vote_count"],
+        "rate_per_minute": round(float(window["rate_per_minute"]), 4),
+        "anomaly_score": round(float(window["anomaly_score"]), 6),
+    }
 
 
 def generate_anomaly_report(vote_audit_collection, window_minutes=5):
-    rows = list(
-        vote_audit_collection.find({}, {"_id": 0, "voted_at": 1, "audit_id": 1}).sort([("voted_at", 1), ("audit_id", 1)])
-    )
-    timestamps = [parsed for parsed in (_utc_datetime(row.get("voted_at")) for row in rows) if parsed is not None]
+    rows = list(vote_audit_collection.find({}, {"_id": 0, "voted_at": 1}).sort("voted_at", 1))
+    vote_times = [_to_utc(row.get("voted_at")) for row in rows]
+    vote_times = [item for item in vote_times if item is not None]
 
-    if len(timestamps) < 6:
+    if len(vote_times) < 6:
         return {
-            "analysis_window_minutes": int(window_minutes),
-            "votes_analyzed": len(timestamps),
-            "suspicious_window_count": 0,
             "items": [],
+            "suspicious_window_count": 0,
+            "analysis_window_minutes": window_minutes,
             "note": "At least 6 votes are required before anomaly detection becomes meaningful.",
         }
 
-    windows = _build_rolling_windows(timestamps, window_minutes)
-    if len(windows) < 4:
+    delta = datetime.timedelta(minutes=max(int(window_minutes), 1))
+    first_ts = vote_times[0]
+    last_ts = vote_times[-1]
+    windows = []
+    current_start = first_ts
+    index = 0
+
+    while current_start <= last_ts:
+        current_end = current_start + delta
+        vote_count = 0
+        while index < len(vote_times) and vote_times[index] < current_end:
+            vote_count += 1
+            index += 1
+        windows.append(
+            {
+                "window_start": current_start,
+                "window_end": current_end,
+                "vote_count": vote_count,
+                "rate_per_minute": vote_count / max(float(window_minutes), 1.0),
+            }
+        )
+        current_start = current_end
+
+    if len(windows) < 3:
         return {
-            "analysis_window_minutes": int(window_minutes),
-            "votes_analyzed": len(timestamps),
-            "suspicious_window_count": 0,
             "items": [],
+            "suspicious_window_count": 0,
+            "analysis_window_minutes": window_minutes,
             "note": "Not enough time windows were produced for anomaly detection.",
         }
 
-    vote_counts = [window["vote_count"] for window in windows]
-    gap_values = [window["average_gap_seconds"] for window in windows]
-    median_vote_count = float(np.median(vote_counts))
-    median_gap_seconds = float(np.median(gap_values))
+    feature_rows = np.array(
+        [
+            [
+                float(window["vote_count"]),
+                float(window["rate_per_minute"]),
+                float((window["window_start"] - first_ts).total_seconds() / 60.0),
+            ]
+            for window in windows
+        ],
+        dtype=float,
+    )
 
-    feature_rows = []
-    for window in windows:
-        inverse_gap = 1.0 / max(window["average_gap_seconds"], 1.0)
-        feature_rows.append([float(window["vote_count"]), float(window["rate_per_minute"]), inverse_gap])
-
-    if len({tuple(row) for row in feature_rows}) <= 1:
-        return {
-            "analysis_window_minutes": int(window_minutes),
-            "votes_analyzed": len(timestamps),
-            "suspicious_window_count": 0,
-            "items": [],
-            "note": "Voting activity is too uniform to isolate suspicious spikes.",
-        }
-
-    contamination = min(0.25, max(0.1, 2.0 / len(feature_rows)))
-    model = IsolationForest(contamination=contamination, n_estimators=150, random_state=42)
+    contamination = min(0.35, max(0.1, 2.0 / len(windows)))
+    model = IsolationForest(random_state=42, contamination=contamination)
     predictions = model.fit_predict(feature_rows)
     anomaly_scores = model.score_samples(feature_rows)
+    baseline_rate = float(np.median([window["rate_per_minute"] for window in windows]))
 
-    suspicious_windows = []
-    minimum_spike_votes = max(2, int(math.ceil(median_vote_count)))
+    suspicious = []
     for window, prediction, score in zip(windows, predictions, anomaly_scores):
-        faster_than_baseline = window["vote_count"] >= minimum_spike_votes or window["average_gap_seconds"] < median_gap_seconds
-        if prediction != -1 or not faster_than_baseline:
-            continue
+        window["anomaly_score"] = score
+        faster_than_baseline = window["rate_per_minute"] >= baseline_rate
+        if prediction == -1 and faster_than_baseline:
+            suspicious.append(_window_to_item(window))
 
-        suspicious_windows.append(
-            {
-                **window,
-                "anomaly_score": round(float(score), 6),
-            }
-        )
-
-    merged_windows = _merge_windows(suspicious_windows)
-    items = [
-        {
-            "window_start": _utc_iso(window["window_start_dt"]),
-            "window_end": _utc_iso(window["window_end_dt"]),
-            "vote_count": int(window["vote_count"]),
-            "rate_per_minute": round(float(window["rate_per_minute"]), 4),
-            "average_gap_seconds": round(float(window["average_gap_seconds"]), 2),
-            "anomaly_score": round(float(window["anomaly_score"]), 6),
-        }
-        for window in merged_windows
-    ]
-
+    suspicious.sort(key=lambda row: (row["anomaly_score"], -row["rate_per_minute"]))
     return {
-        "analysis_window_minutes": int(window_minutes),
-        "votes_analyzed": len(timestamps),
-        "suspicious_window_count": len(items),
-        "items": items,
+        "items": suspicious,
+        "suspicious_window_count": len(suspicious),
+        "analysis_window_minutes": window_minutes,
+        "baseline_rate_per_minute": round(baseline_rate, 4),
+        "note": "Windows with unusually fast voting bursts are flagged.",
     }

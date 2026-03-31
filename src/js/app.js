@@ -1,10 +1,7 @@
 // src/js/app.js
 
 const Web3 = require('web3');
-const contract = require('@truffle/contract');
 const votingArtifacts = require('../../build/contracts/Voting.json');
-
-const VotingContract = contract(votingArtifacts);
 const apiBaseOverride = window.__API_BASE__ || document.querySelector('meta[name="api-base"]')?.content;
 const API_BASE = String(apiBaseOverride || window.location.origin).replace(/\/+$/, '');
 const rpcUrlOverride = window.__RPC_URL__ || document.querySelector('meta[name="rpc-url"]')?.content;
@@ -102,9 +99,6 @@ window.App = {
         console.warn('Could not get accounts from fallback provider:', e);
       }
     }
-
-    // Hook the provider to Truffle Contract
-    VotingContract.setProvider(this.web3.currentProvider);
   },
 
   // ---- lifecycle entrypoint ----
@@ -127,29 +121,22 @@ window.App = {
         const artifactAddress = votingArtifacts.networks?.[networkId]?.address || '';
         const deployedAddress = CONFIGURED_VOTING_ADDRESS || artifactAddress;
 
-        if (deployedAddress) {
-          const code = await this.web3.eth.getCode(deployedAddress);
-          if (!code || code === '0x' || code === '0x0') {
-            throw new Error(
-              `No contract code found at ${deployedAddress} on chain ${networkId}. ` +
-              'Deploy Voting.sol to Sepolia using MetaMask and update VOTING_CONTRACT_ADDRESS.'
-            );
-          }
-          console.log('Using voting contract address:', deployedAddress);
-          this.voting = new this.web3.eth.Contract(votingArtifacts.abi, deployedAddress);
-        } else {
-          try {
-            this.voting = await VotingContract.deployed();
-          } catch (err) {
-            console.error('Contract deployment error:', err);
-            console.error('Current Chain ID:', networkId);
-            console.error('Configured Contract Address:', CONFIGURED_VOTING_ADDRESS || '(empty)');
-            throw new Error(
-              'Voting contract address is not configured for this network. ' +
-              'Set VOTING_CONTRACT_ADDRESS to your Remix-deployed Sepolia contract address.'
-            );
-          }
+        if (!deployedAddress) {
+          throw new Error(
+            'Voting contract address is not configured for this network. ' +
+            'Set VOTING_CONTRACT_ADDRESS to your Remix-deployed contract address.'
+          );
         }
+
+        const code = await this.web3.eth.getCode(deployedAddress);
+        if (!code || code === '0x' || code === '0x0') {
+          throw new Error(
+            `No contract code found at ${deployedAddress} on chain ${networkId}. ` +
+            'Deploy Voting.sol with Remix, then update VOTING_CONTRACT_ADDRESS.'
+          );
+        }
+        console.log('Using voting contract address:', deployedAddress);
+        this.voting = new this.web3.eth.Contract(votingArtifacts.abi, deployedAddress);
 
         // Initial UI render
         await this.renderDates();
@@ -168,7 +155,7 @@ window.App = {
           }
           try {
             await this.sendAddCandidateTx(nameCandidate, partyCandidate);
-            // Persist candidate to DB so voter dashboard can fetch from MySQL in realtime.
+            // Persist candidate to MongoDB so the voter page can read the latest list.
             try {
               const newIdRaw = await this.readCountCandidates();
               const newId = Number(newIdRaw);
