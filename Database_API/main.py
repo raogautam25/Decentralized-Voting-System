@@ -423,6 +423,11 @@ def validate_single_face_image(image_bytes, context_label):
             status_code=400,
             detail=f"Multiple faces detected in the {context_label}. Please keep only one voter in frame.",
         )
+    if analysis.get("frontal_face_count", 0) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"A straight front-facing face is required in the {context_label}. Please look directly at the camera.",
+        )
     return analysis
 
 
