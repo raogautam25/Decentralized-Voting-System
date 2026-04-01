@@ -351,6 +351,7 @@ class LoadingManager {
           if (feedbackStatus) {
             feedbackStatus.textContent = 'Feedback saved. Resetting session...';
           }
+          finish();
         } catch (error) {
           console.error('Feedback submission error:', error);
           if (feedbackStatus) {
@@ -359,13 +360,6 @@ class LoadingManager {
           // Reset button state to allow retry
           submitButton.disabled = false;
           skipButton.disabled = false;
-          return;
-        } finally {
-          // Only finish after successful save
-          if (!submitButton.disabled) {
-            return; // User can retry
-          }
-          finish();
         }
       };
 
