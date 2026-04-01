@@ -292,6 +292,7 @@ class LoadingManager {
     const skipButton = document.getElementById('skipFeedbackBtn');
 
     if (!feedbackContainer || !feedbackInput || !submitButton || !skipButton) {
+      console.warn('Feedback form elements not found, skipping feedback collection');
       return;
     }
 
@@ -351,10 +352,19 @@ class LoadingManager {
             feedbackStatus.textContent = 'Feedback saved. Resetting session...';
           }
         } catch (error) {
+          console.error('Feedback submission error:', error);
           if (feedbackStatus) {
             feedbackStatus.textContent = `Feedback save failed: ${error?.message || 'Unknown error'}. Continuing without it.`;
           }
+          // Reset button state to allow retry
+          submitButton.disabled = false;
+          skipButton.disabled = false;
+          return;
         } finally {
+          // Only finish after successful save
+          if (!submitButton.disabled) {
+            return; // User can retry
+          }
           finish();
         }
       };
@@ -374,13 +384,33 @@ class LoadingManager {
     });
   }
 
+      feedbackInput.addEventListener('input', handleInput);
+      submitButton.addEventListener('click', handleSubmit);
+      skipButton.addEventListener('click', handleSkip);
+
+      if (this.feedbackTimeoutMs > 0) {
+        timeoutId = setTimeout(() => {
+          if (feedbackStatus) {
+            feedbackStatus.textContent = 'Time window ended. Resetting session...';
+          }
+          finish();
+        }, this.feedbackTimeoutMs);
+      }
+    });
+  }
+
   async saveFeedback(feedback) {
     const pendingAudit = safeJsonParse(localStorage.getItem('pendingVoteAudit'), null);
     const lastSummary = safeJsonParse(localStorage.getItem('lastTxSummary'), null);
+    
+    if (!feedback || !feedback.trim()) {
+      throw new Error('Feedback text is empty');
+    }
+
     const payload = pendingAudit?.voter_id
       ? {
           ...pendingAudit,
-          feedback,
+          feedback: feedback.trim(),
           tx_hash: pendingAudit.tx_hash || lastSummary?.tx_hash || this.transactionHash || '',
         }
       : {
@@ -389,18 +419,30 @@ class LoadingManager {
           candidate_name: lastSummary?.candidate_name || '',
           party: lastSummary?.party || '',
           tx_hash: lastSummary?.tx_hash || this.transactionHash || '',
-          feedback,
+          feedback: feedback.trim(),
         };
+
+    console.log('Sending feedback payload:', {
+      has_voter_id: !!payload.voter_id,
+      feedback_length: payload.feedback?.length || 0,
+      has_tx_hash: !!payload.tx_hash,
+    });
 
     const res = await fetch(`${API_BASE}/vote/audit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
+    
     const data = await res.json().catch(() => ({}));
+    
     if (!res.ok) {
-      throw new Error(data.detail || 'Feedback save failed');
+      const errorMsg = data.detail || data.message || `HTTP ${res.status}`;
+      console.error('Feedback save failed:', errorMsg, data);
+      throw new Error(`Feedback save failed: ${errorMsg}`);
     }
+    
+    console.log('Feedback saved successfully:', data);
     localStorage.removeItem('pendingVoteAudit');
     localStorage.removeItem('pendingVoteAuditError');
     if (data?.message) {
