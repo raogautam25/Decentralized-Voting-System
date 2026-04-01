@@ -32,6 +32,7 @@ class AdminTools {
     this.qrImageDataUrl = null;
     this.nominationBound = false;
     this.electionStateTimer = null;
+    this.registeringVoter = false;
     this.init();
   }
 
@@ -123,6 +124,11 @@ class AdminTools {
   }
 
   async registerVoter() {
+    if (this.registeringVoter) {
+      setStatus(byId('registerMsg'), 'Voter save already in progress. Please wait...');
+      return;
+    }
+
     const payload = {
       full_name: byId('regFullName')?.value?.trim(),
       date_of_birth: byId('regDateOfBirth')?.value?.trim(),
@@ -148,6 +154,9 @@ class AdminTools {
     }
 
     try {
+      this.registeringVoter = true;
+      const registerBtn = byId('registerVoterBtn');
+      if (registerBtn) registerBtn.disabled = true;
       byId('voterCard').style.display = 'none';
       byId('regGeneratedVoterId').value = '';
       setStatus(byId('registerMsg'), 'Saving voter...', { isBusy: true });
@@ -162,6 +171,10 @@ class AdminTools {
     } catch (e) {
       byId('voterCard').style.display = 'none';
       setStatus(byId('registerMsg'), this.formatRegistrationError(e), { isError: true, isBusy: false });
+    } finally {
+      this.registeringVoter = false;
+      const registerBtn = byId('registerVoterBtn');
+      if (registerBtn) registerBtn.disabled = false;
     }
   }
 

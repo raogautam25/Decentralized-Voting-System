@@ -220,9 +220,9 @@ class VoterDashboard {
       }
 
       if (this.scannerMode !== 'html5-qrcode') {
-        this.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        this.stream = await this.acquireCameraStream('environment');
         const video = document.getElementById('qrVideo');
-        video.srcObject = this.stream;
+        await this.attachStreamToVideo(video, this.stream);
       }
 
       if (this.scannerMode === 'html5-qrcode') {
@@ -343,11 +343,17 @@ class VoterDashboard {
     this.updateActionButtons();
     this.setMsg('verifyMsg', 'QR detected. Auto verifying...');
     await this.stopScanner();
-    await this.startCapturePreview();
+    const previewReady = await this.startCapturePreview();
+    if (!previewReady) {
+      this.autoVerifying = false;
+      this.setMsg('verifyMsg', 'Auto verify ke liye live camera ready nahi hua. QR dobara scan karo ya manual confirm use karo.', true);
+      this.updateActionButtons();
+      return;
+    }
     const confirmed = await this.autoCaptureAndConfirm();
     if (!confirmed) {
       this.autoVerifying = false;
-      this.setMsg('verifyMsg', 'Auto verify failed. Capture + Confirm buttons use karo.', true);
+      this.setMsg('verifyMsg', 'Auto verify failed. QR dobara scan karo, phir OK (Ready) flow use karo.', true);
     }
     this.updateActionButtons();
   }
@@ -384,11 +390,13 @@ class VoterDashboard {
 
   async startCapturePreview() {
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      this.stream = await this.acquireCameraStream('user');
       const video = document.getElementById('qrVideo');
-      video.srcObject = this.stream;
+      await this.attachStreamToVideo(video, this.stream);
+      return true;
     } catch (e) {
       this.setMsg('verifyMsg', `Camera preview error: ${e.message}`, true);
+      return false;
     }
   }
 
@@ -450,7 +458,7 @@ class VoterDashboard {
 
   async autoCaptureAndConfirm() {
     const video = document.getElementById('qrVideo');
-    const maxWaitMs = 2500;
+    const maxWaitMs = 6000;
     const start = Date.now();
     while (Date.now() - start < maxWaitMs) {
       if (video && video.readyState >= 2) break;
@@ -462,6 +470,77 @@ class VoterDashboard {
     if (!this.onVoteDayImage) return false;
     await this.confirmScannedVoter();
     return !!this.verifiedVoter;
+  }
+
+  async acquireCameraStream(preferredFacingMode = 'environment') {
+    const attempts = [];
+    if (preferredFacingMode) {
+      attempts.push({ video: { facingMode: { ideal: preferredFacingMode } } });
+    }
+
+    const alternateFacingMode = preferredFacingMode === 'environment' ? 'user' : 'environment';
+    attempts.push({ video: { facingMode: { ideal: alternateFacingMode } } });
+    attempts.push({ video: true });
+
+    let lastError = null;
+    for (const constraints of attempts) {
+      try {
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError || new Error('Unable to access camera');
+  }
+
+  async attachStreamToVideo(video, stream) {
+    if (!video) throw new Error('Video element not found');
+
+    video.srcObject = stream;
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+      const fail = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(new Error('Camera preview could not start'));
+      };
+      const cleanup = () => {
+        video.removeEventListener('loadedmetadata', onLoadedMetadata);
+        video.removeEventListener('canplay', done);
+        video.removeEventListener('error', fail);
+      };
+      const onLoadedMetadata = () => {
+        const maybePlay = video.play?.();
+        if (maybePlay && typeof maybePlay.then === 'function') {
+          maybePlay.then(done).catch(() => {
+            // Fallback to canplay in browsers that block an early play() call.
+          });
+        }
+      };
+
+      video.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
+      video.addEventListener('canplay', done, { once: true });
+      video.addEventListener('error', fail, { once: true });
+
+      if (video.readyState >= 2) {
+        done();
+      } else {
+        setTimeout(() => {
+          if (!settled && video.readyState >= 2) done();
+        }, 1200);
+        setTimeout(() => {
+          if (!settled) fail();
+        }, 7000);
+      }
+    });
   }
 
   async confirmScannedVoter() {
