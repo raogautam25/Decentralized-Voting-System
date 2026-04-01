@@ -215,7 +215,7 @@ class LoadingManager {
       const blockNumber = localStorage.getItem('blockNumber') || '';
       const txHash = localStorage.getItem('currentTxHash') || this.transactionHash || '';
 
-      const auditRaw = localStorage.getItem('pendingVoteAudit');
+      const auditRaw = localStorage.getItem('pendingVoteAudit') || localStorage.getItem('lastSavedVoteAudit');
       const audit = auditRaw ? safeJsonParse(auditRaw, null) : null;
 
       const summary = {
@@ -252,6 +252,8 @@ class LoadingManager {
     localStorage.removeItem('txStatus');
     localStorage.removeItem('pendingVoteFeedback');
     localStorage.removeItem('pendingVoteAuditError');
+    localStorage.removeItem('lastSavedVoteAudit');
+    localStorage.removeItem('lastTxSummary');
 
     // Used by voter.js to force fresh verification if the user navigates back.
     localStorage.setItem('lastVoteCompleted', '1');
@@ -379,7 +381,7 @@ class LoadingManager {
   }
 
   async saveFeedback(feedback) {
-    const pendingAudit = safeJsonParse(localStorage.getItem('pendingVoteAudit'), null);
+    const pendingAudit = safeJsonParse(localStorage.getItem('pendingVoteAudit') || localStorage.getItem('lastSavedVoteAudit'), null);
     const lastSummary = safeJsonParse(localStorage.getItem('lastTxSummary'), null);
     
     if (!feedback || !feedback.trim()) {

@@ -689,6 +689,7 @@ class VoteConfirmation {
     if (!res.ok) {
       throw new Error(data.detail || 'Vote audit save failed');
     }
+    localStorage.setItem('lastSavedVoteAudit', JSON.stringify(payload));
     localStorage.removeItem('pendingVoteAudit');
     localStorage.removeItem('pendingVoteAuditError');
   }

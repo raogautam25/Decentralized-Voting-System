@@ -1219,20 +1219,32 @@ async def save_vote_audit(request: Request):
         print(traceback.format_exc())
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    required_fields = ["voter_id", "candidate_id", "candidate_name", "party"]
-    for field_name in required_fields:
-        if payload.get(field_name) in (None, ""):
-            raise HTTPException(status_code=400, detail=f"{field_name} is required")
-
-    voter_id = str(payload["voter_id"]).strip()
-    candidate_id = int(payload["candidate_id"])
-    candidate_name = payload["candidate_name"]
-    party = payload["party"]
+    voter_id = str(payload.get("voter_id") or "").strip()
+    candidate_id_raw = payload.get("candidate_id")
+    candidate_name = payload.get("candidate_name")
+    party = payload.get("party")
     tx_hash = payload.get("tx_hash")
     pre_vote_image = payload.get("pre_vote_image")
     on_vote_day_image = payload.get("on_vote_day_image")
     feedback_text = normalize_feedback_text(payload.get("feedback"))
     feedback_details = analyze_feedback(feedback_text)
+
+    if not voter_id and not tx_hash:
+        raise HTTPException(status_code=400, detail="voter_id or tx_hash is required")
+
+    # Creation path needs core fields; feedback-only updates can just use tx_hash/voter_id
+    if not feedback_text:
+        if not voter_id:
+            raise HTTPException(status_code=400, detail="voter_id is required for vote creation")
+
+        if candidate_id_raw in (None, ""):
+            raise HTTPException(status_code=400, detail="candidate_id is required")
+        if not candidate_name:
+            raise HTTPException(status_code=400, detail="candidate_name is required")
+        if not party:
+            raise HTTPException(status_code=400, detail="party is required")
+
+    candidate_id = int(candidate_id_raw) if candidate_id_raw not in (None, "") else None
 
     pre_vote_blob, pre_vote_mime = decode_image_bytes_from_data_url(pre_vote_image) if pre_vote_image else (None, None)
     on_vote_day_blob, on_vote_day_mime = decode_image_bytes_from_data_url(on_vote_day_image) if on_vote_day_image else (None, None)
@@ -1240,11 +1252,17 @@ async def save_vote_audit(request: Request):
     on_vote_day_path = save_image_bytes(on_vote_day_blob, on_vote_day_mime, f"on_vote_{voter_id}") if on_vote_day_blob else None
 
     try:
-        existing_audit = coll("vote_audit").find_one({"voter_id": voter_id}, {"_id": 1, "tx_hash": 1})
+        audit_query = {}
+        if voter_id:
+            audit_query["voter_id"] = voter_id
+        if tx_hash:
+            audit_query["tx_hash"] = tx_hash
+
+        existing_audit = coll("vote_audit").find_one(audit_query, {"_id": 1, "tx_hash": 1}) if audit_query else None
         if existing_audit:
             if feedback_details:
                 coll("vote_audit").update_one(
-                    {"voter_id": voter_id},
+                    {"_id": existing_audit["_id"]},
                     {
                         "$set": {
                             "feedback": feedback_details["feedback"],
