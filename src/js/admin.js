@@ -180,26 +180,28 @@ class AdminTools {
       const canvas = document.createElement('canvas');
       canvas.width = img.naturalWidth || img.width || 1;
       canvas.height = img.naturalHeight || img.height || 1;
+      const width = canvas.width;
+      const height = canvas.height;
       const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, width, height);
 
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, width, height);
       const { data } = imageData;
       const borderPixels = [];
-      const step = Math.max(1, Math.floor(Math.min(canvas.width, canvas.height) / 30));
+      const step = Math.max(1, Math.floor(Math.min(width, height) / 30));
 
       const pushPixel = (x, y) => {
-        const idx = (y * canvas.width + x) * 4;
+        const idx = (y * width + x) * 4;
         borderPixels.push([data[idx], data[idx + 1], data[idx + 2]]);
       };
 
-      for (let x = 0; x < canvas.width; x += step) {
+      for (let x = 0; x < width; x += step) {
         pushPixel(x, 0);
-        pushPixel(x, canvas.height - 1);
+        pushPixel(x, height - 1);
       }
-      for (let y = 0; y < canvas.height; y += step) {
+      for (let y = 0; y < height; y += step) {
         pushPixel(0, y);
-        pushPixel(canvas.width - 1, y);
+        pushPixel(width - 1, y);
       }
 
       const bg = borderPixels.reduce((acc, pixel) => {
@@ -209,28 +211,90 @@ class AdminTools {
         return acc;
       }, [0, 0, 0]).map((value) => value / Math.max(borderPixels.length, 1));
 
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
+      const averageBorderDeviation = borderPixels.reduce((sum, pixel) => {
+        return sum + Math.sqrt(
+          ((pixel[0] - bg[0]) ** 2) +
+          ((pixel[1] - bg[1]) ** 2) +
+          ((pixel[2] - bg[2]) ** 2)
+        );
+      }, 0) / Math.max(borderPixels.length, 1);
+
+      const backgroundThreshold = Math.max(28, Math.min(70, 22 + (averageBorderDeviation * 1.35)));
+      const brightThreshold = 244;
+      const neutralThreshold = 26;
+      const totalPixels = width * height;
+      const visited = new Uint8Array(totalPixels);
+      const backgroundMask = new Uint8Array(totalPixels);
+      const queue = new Uint32Array(totalPixels);
+      let head = 0;
+      let tail = 0;
+      let backgroundCount = 0;
+
+      const isBackgroundCandidate = (pixelIndex) => {
+        const idx = pixelIndex * 4;
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
         const luminance = (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
         const colorDistance = Math.sqrt(
           ((r - bg[0]) ** 2) +
           ((g - bg[1]) ** 2) +
           ((b - bg[2]) ** 2)
         );
+        const channelSpread = Math.max(r, g, b) - Math.min(r, g, b);
+        return colorDistance <= backgroundThreshold
+          || (luminance >= brightThreshold && channelSpread <= neutralThreshold);
+      };
 
-        if (colorDistance < 55 || luminance > 242) {
-          data[i] = 255;
-          data[i + 1] = 255;
-          data[i + 2] = 255;
+      const enqueue = (x, y) => {
+        if (x < 0 || x >= width || y < 0 || y >= height) return;
+        const pixelIndex = (y * width) + x;
+        if (visited[pixelIndex]) return;
+        visited[pixelIndex] = 1;
+        if (!isBackgroundCandidate(pixelIndex)) return;
+        backgroundMask[pixelIndex] = 1;
+        queue[tail] = pixelIndex;
+        tail += 1;
+        backgroundCount += 1;
+      };
+
+      for (let x = 0; x < width; x += 1) {
+        enqueue(x, 0);
+        enqueue(x, height - 1);
+      }
+      for (let y = 0; y < height; y += 1) {
+        enqueue(0, y);
+        enqueue(width - 1, y);
+      }
+
+      while (head < tail) {
+        const pixelIndex = queue[head];
+        head += 1;
+        const x = pixelIndex % width;
+        const y = Math.floor(pixelIndex / width);
+        enqueue(x - 1, y);
+        enqueue(x + 1, y);
+        enqueue(x, y - 1);
+        enqueue(x, y + 1);
+      }
+
+      if (backgroundCount / Math.max(totalPixels, 1) > 0.94) {
+        return photoData;
+      }
+
+      for (let pixelIndex = 0; pixelIndex < totalPixels; pixelIndex += 1) {
+        if (backgroundMask[pixelIndex]) {
+          const idx = pixelIndex * 4;
+          data[idx] = 255;
+          data[idx + 1] = 255;
+          data[idx + 2] = 255;
         }
       }
 
       ctx.putImageData(imageData, 0, 0);
       const output = document.createElement('canvas');
-      output.width = canvas.width;
-      output.height = canvas.height;
+      output.width = width;
+      output.height = height;
       const outputCtx = output.getContext('2d');
       outputCtx.fillStyle = '#ffffff';
       outputCtx.fillRect(0, 0, output.width, output.height);
