@@ -168,141 +168,88 @@ class AdminTools {
   async prepareCardPhoto(photoData) {
     if (!photoData) return '';
 
-    const loadImage = () => new Promise((resolve, reject) => {
+    try {
+      const img = await this.loadImage(photoData);
+      const width = img.naturalWidth || img.width || 1;
+      const height = img.naturalHeight || img.height || 1;
+      const faceBox = await this.detectPrimaryFace(img);
+      const crop = this.computeCardPhotoCrop(width, height, faceBox);
+      const output = document.createElement('canvas');
+      output.width = 320;
+      output.height = 320;
+      const outputCtx = output.getContext('2d');
+      outputCtx.fillStyle = '#ffffff';
+      outputCtx.fillRect(0, 0, output.width, output.height);
+      outputCtx.imageSmoothingEnabled = true;
+      outputCtx.imageSmoothingQuality = 'high';
+      outputCtx.drawImage(
+        img,
+        crop.sx,
+        crop.sy,
+        crop.sw,
+        crop.sh,
+        0,
+        0,
+        output.width,
+        output.height
+      );
+      return output.toDataURL('image/jpeg', 0.95);
+    } catch {
+      return photoData;
+    }
+  }
+
+  loadImage(photoData) {
+    return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => resolve(img);
       img.onerror = reject;
       img.src = photoData;
     });
+  }
+
+  async detectPrimaryFace(img) {
+    if (!('FaceDetector' in window)) return null;
 
     try {
-      const img = await loadImage();
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth || img.width || 1;
-      canvas.height = img.naturalHeight || img.height || 1;
-      const width = canvas.width;
-      const height = canvas.height;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true });
-      ctx.drawImage(img, 0, 0, width, height);
+      const detector = new window.FaceDetector({ fastMode: true, maxDetectedFaces: 1 });
+      const faces = await detector.detect(img);
+      if (!Array.isArray(faces) || faces.length === 0) return null;
 
-      const imageData = ctx.getImageData(0, 0, width, height);
-      const { data } = imageData;
-      const borderPixels = [];
-      const step = Math.max(1, Math.floor(Math.min(width, height) / 30));
+      const primaryFace = faces.reduce((largest, current) => {
+        const currentArea = current.boundingBox.width * current.boundingBox.height;
+        const largestArea = largest.boundingBox.width * largest.boundingBox.height;
+        return currentArea > largestArea ? current : largest;
+      });
 
-      const pushPixel = (x, y) => {
-        const idx = (y * width + x) * 4;
-        borderPixels.push([data[idx], data[idx + 1], data[idx + 2]]);
-      };
-
-      for (let x = 0; x < width; x += step) {
-        pushPixel(x, 0);
-        pushPixel(x, height - 1);
-      }
-      for (let y = 0; y < height; y += step) {
-        pushPixel(0, y);
-        pushPixel(width - 1, y);
-      }
-
-      const bg = borderPixels.reduce((acc, pixel) => {
-        acc[0] += pixel[0];
-        acc[1] += pixel[1];
-        acc[2] += pixel[2];
-        return acc;
-      }, [0, 0, 0]).map((value) => value / Math.max(borderPixels.length, 1));
-
-      const averageBorderDeviation = borderPixels.reduce((sum, pixel) => {
-        return sum + Math.sqrt(
-          ((pixel[0] - bg[0]) ** 2) +
-          ((pixel[1] - bg[1]) ** 2) +
-          ((pixel[2] - bg[2]) ** 2)
-        );
-      }, 0) / Math.max(borderPixels.length, 1);
-
-      const backgroundThreshold = Math.max(28, Math.min(70, 22 + (averageBorderDeviation * 1.35)));
-      const brightThreshold = 244;
-      const neutralThreshold = 26;
-      const totalPixels = width * height;
-      const visited = new Uint8Array(totalPixels);
-      const backgroundMask = new Uint8Array(totalPixels);
-      const queue = new Uint32Array(totalPixels);
-      let head = 0;
-      let tail = 0;
-      let backgroundCount = 0;
-
-      const isBackgroundCandidate = (pixelIndex) => {
-        const idx = pixelIndex * 4;
-        const r = data[idx];
-        const g = data[idx + 1];
-        const b = data[idx + 2];
-        const luminance = (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
-        const colorDistance = Math.sqrt(
-          ((r - bg[0]) ** 2) +
-          ((g - bg[1]) ** 2) +
-          ((b - bg[2]) ** 2)
-        );
-        const channelSpread = Math.max(r, g, b) - Math.min(r, g, b);
-        return colorDistance <= backgroundThreshold
-          || (luminance >= brightThreshold && channelSpread <= neutralThreshold);
-      };
-
-      const enqueue = (x, y) => {
-        if (x < 0 || x >= width || y < 0 || y >= height) return;
-        const pixelIndex = (y * width) + x;
-        if (visited[pixelIndex]) return;
-        visited[pixelIndex] = 1;
-        if (!isBackgroundCandidate(pixelIndex)) return;
-        backgroundMask[pixelIndex] = 1;
-        queue[tail] = pixelIndex;
-        tail += 1;
-        backgroundCount += 1;
-      };
-
-      for (let x = 0; x < width; x += 1) {
-        enqueue(x, 0);
-        enqueue(x, height - 1);
-      }
-      for (let y = 0; y < height; y += 1) {
-        enqueue(0, y);
-        enqueue(width - 1, y);
-      }
-
-      while (head < tail) {
-        const pixelIndex = queue[head];
-        head += 1;
-        const x = pixelIndex % width;
-        const y = Math.floor(pixelIndex / width);
-        enqueue(x - 1, y);
-        enqueue(x + 1, y);
-        enqueue(x, y - 1);
-        enqueue(x, y + 1);
-      }
-
-      if (backgroundCount / Math.max(totalPixels, 1) > 0.94) {
-        return photoData;
-      }
-
-      for (let pixelIndex = 0; pixelIndex < totalPixels; pixelIndex += 1) {
-        if (backgroundMask[pixelIndex]) {
-          const idx = pixelIndex * 4;
-          data[idx] = 255;
-          data[idx + 1] = 255;
-          data[idx + 2] = 255;
-        }
-      }
-
-      ctx.putImageData(imageData, 0, 0);
-      const output = document.createElement('canvas');
-      output.width = width;
-      output.height = height;
-      const outputCtx = output.getContext('2d');
-      outputCtx.fillStyle = '#ffffff';
-      outputCtx.fillRect(0, 0, output.width, output.height);
-      outputCtx.drawImage(canvas, 0, 0);
-      return output.toDataURL('image/jpeg', 0.95);
+      return primaryFace.boundingBox || null;
     } catch {
-      return photoData;
+      return null;
     }
+  }
+
+  computeCardPhotoCrop(width, height, faceBox) {
+    const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+    if (faceBox?.width && faceBox?.height) {
+      const faceCenterX = faceBox.x + (faceBox.width / 2);
+      const faceCenterY = faceBox.y + (faceBox.height * 0.52);
+      const cropSize = Math.max(
+        faceBox.width * 2.2,
+        faceBox.height * 2.65,
+        Math.min(width, height) * 0.54
+      );
+      const safeCropSize = Math.min(cropSize, width, height);
+      const sx = clamp(faceCenterX - (safeCropSize / 2), 0, width - safeCropSize);
+      const sy = clamp(faceCenterY - (safeCropSize * 0.42), 0, height - safeCropSize);
+      return { sx, sy, sw: safeCropSize, sh: safeCropSize };
+    }
+
+    const safeCropSize = Math.min(width, height);
+    const sx = Math.max(0, (width - safeCropSize) / 2);
+    const preferredTop = height * 0.1;
+    const sy = clamp(preferredTop, 0, height - safeCropSize);
+    return { sx, sy, sw: safeCropSize, sh: safeCropSize };
   }
 
   async renderCard(data, photoData) {
