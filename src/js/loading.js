@@ -378,21 +378,6 @@ class LoadingManager {
     });
   }
 
-      feedbackInput.addEventListener('input', handleInput);
-      submitButton.addEventListener('click', handleSubmit);
-      skipButton.addEventListener('click', handleSkip);
-
-      if (this.feedbackTimeoutMs > 0) {
-        timeoutId = setTimeout(() => {
-          if (feedbackStatus) {
-            feedbackStatus.textContent = 'Time window ended. Resetting session...';
-          }
-          finish();
-        }, this.feedbackTimeoutMs);
-      }
-    });
-  }
-
   async saveFeedback(feedback) {
     const pendingAudit = safeJsonParse(localStorage.getItem('pendingVoteAudit'), null);
     const lastSummary = safeJsonParse(localStorage.getItem('lastTxSummary'), null);
