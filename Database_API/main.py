@@ -781,13 +781,18 @@ async def get_voter_by_qr(qr_token: str):
 @app.get("/candidates")
 async def list_candidates():
     items = []
+    onchain_candidates = []
     onchain_votes = {}
     try:
-        onchain_votes = {item["candidate_id"]: item["vote_count"] for item in get_onchain_candidate_results()}
+        onchain_candidates = get_onchain_candidate_results()
+        onchain_votes = {item["candidate_id"]: item["vote_count"] for item in onchain_candidates}
     except HTTPException:
+        onchain_candidates = []
         onchain_votes = {}
 
-    for row in coll("candidates").find({}, {"_id": 0}).sort("candidate_id", ASCENDING):
+    candidate_rows = list(coll("candidates").find({}, {"_id": 0}).sort("candidate_id", ASCENDING))
+
+    for row in candidate_rows:
         items.append(
             {
                 "candidate_id": int(row["candidate_id"]),
@@ -799,6 +804,20 @@ async def list_candidates():
                 "date_of_birth": row.get("date_of_birth"),
             }
         )
+
+    if not items and onchain_candidates:
+        for row in onchain_candidates:
+            items.append(
+                {
+                    "candidate_id": int(row.get("candidate_id", 0) or 0),
+                    "name": row.get("name"),
+                    "party": row.get("party"),
+                    "symbol": None,
+                    "vote_count": int(row.get("vote_count", 0) or 0),
+                    "party_symbol_image": None,
+                    "date_of_birth": None,
+                }
+            )
     return {"items": items}
 
 

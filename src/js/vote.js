@@ -209,21 +209,6 @@ class VoteConfirmation {
     }
   }
 
-  async verifyReadyFace(liveImageData) {
-    if (!(this.verifiedVoter && this.verifiedVoter.qr_token)) {
-      throw new Error('Please scan QR first.');
-    }
-
-    return fetchJson(`${API_BASE}/voter/ready-check`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        qr_token: this.verifiedVoter.qr_token,
-        image_data: liveImageData,
-      }),
-    });
-  }
-
   onOkVerified() {
     if (this.isElectionStopped()) {
       this.showVoteError('Election is currently stopped by the administrator.');
@@ -237,70 +222,31 @@ class VoteConfirmation {
       this.showVoteError('This QR voter has already voted. Use a new QR.');
       return;
     }
+    if (!this.verifiedVoter?.face_similarity_score) {
+      this.showVoteError('Voter face is not verified yet. Scan QR again and wait for auto verification.');
+      return;
+    }
     if (this.identityOk) return;
+
     this.identityOk = true;
-    this.readyCheckInProgress = true;
+    this.readyCheckInProgress = false;
+    this.liveGateCaptured = true;
 
     const okBtn = document.getElementById('okVerifiedBtn');
     if (okBtn) {
       okBtn.disabled = true;
-      okBtn.textContent = 'Ready (Capturing...)';
+      okBtn.textContent = 'Ready';
     }
 
-    this.setEvmStatus('Ready for live photo. Auto capture in 5 seconds...');
+    this.setEvmStatus(
+      `Face verified (${this.verifiedVoter.face_similarity_score}). Now press a BLUE button to select candidate.`
+    );
     const messageContainer = document.getElementById('message');
     if (messageContainer) {
-      messageContainer.innerHTML = '<p style="color:#87ceeb;">Hold still. Live photo will capture in 5 seconds, then face match check will run.</p>';
+      messageContainer.innerHTML = `<p style="color:#90ee90;">Voter face verified successfully. Score: <b>${this.verifiedVoter.face_similarity_score}</b>. You can continue to candidate selection.</p>`;
       messageContainer.classList.add('show', 'info');
     }
-
-    setTimeout(async () => {
-      const snap = this.captureCurrentFrame();
-      if (!snap) {
-        this.identityOk = false;
-        this.readyCheckInProgress = false;
-        if (okBtn) {
-          okBtn.disabled = false;
-          okBtn.textContent = 'OK (Ready)';
-        }
-        this.showVoteError('Live photo capture failed. Please try OK again.');
-        return;
-      }
-
-      try {
-        const readyCheck = await this.verifyReadyFace(snap);
-        this.liveGateCaptured = true;
-        this.readyCheckInProgress = false;
-        this.verifiedVoter = {
-          ...this.verifiedVoter,
-          ready_check_image: snap,
-          ready_check_score: readyCheck.face_similarity_score,
-        };
-        localStorage.setItem('verifiedVoter', JSON.stringify(this.verifiedVoter));
-
-        this.setEvmStatus(
-          `Face matched (${readyCheck.face_similarity_score}). Now press a BLUE button to select candidate.`
-        );
-        if (messageContainer) {
-          messageContainer.innerHTML = `<p style="color:#90ee90;">Face matched with voter card image. Score: <b>${readyCheck.face_similarity_score}</b>. You can vote now.</p>`;
-          messageContainer.classList.add('show', 'info');
-        }
-        if (okBtn) {
-          okBtn.disabled = true;
-          okBtn.textContent = 'Ready';
-        }
-        this.applyActionGuard();
-      } catch (error) {
-        this.identityOk = false;
-        this.liveGateCaptured = false;
-        this.readyCheckInProgress = false;
-        if (okBtn) {
-          okBtn.disabled = false;
-          okBtn.textContent = 'OK (Ready)';
-        }
-        this.showVoteError(error?.message || 'Live face verification failed. Please try again.');
-      }
-    }, 5000);
+    this.applyActionGuard();
   }
 
   showConfirmationPage() {
@@ -319,7 +265,8 @@ class VoteConfirmation {
       const was = Boolean(this.verifiedVoter);
       this.verifiedVoter = v;
       if (!was && v) {
-        this.setEvmStatus(`QR verified: ${v.full_name} (${v.voter_id}). Tap OK (Ready).`);
+        const scoreText = v.face_similarity_score ? ` Face score: ${v.face_similarity_score}.` : '';
+        this.setEvmStatus(`QR verified: ${v.full_name} (${v.voter_id}).${scoreText} Tap OK (Ready).`);
       }
 
       const qr = (this.verifiedVoter && this.verifiedVoter.qr_token) ? String(this.verifiedVoter.qr_token) : '';

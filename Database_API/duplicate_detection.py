@@ -10,7 +10,7 @@ FRONTAL_FACE_CASCADE = cv2.CascadeClassifier(
 PROFILE_FACE_CASCADE = cv2.CascadeClassifier(
     os.path.join(cv2.data.haarcascades, "haarcascade_profileface.xml")
 )
-FACE_MATCH_THRESHOLD = float(os.environ.get("FACE_MATCH_THRESHOLD", "0.89"))
+FACE_MATCH_THRESHOLD = float(os.environ.get("FACE_MATCH_THRESHOLD", "0.82"))
 FACE_IMAGE_SIZE = (64, 64)
 CLAHE = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
 HOG_DESCRIPTOR = cv2.HOGDescriptor(FACE_IMAGE_SIZE, (16, 16), (8, 8), (8, 8), 9)
@@ -313,7 +313,7 @@ def compute_similarity_score(source_bytes, existing_image_path, base_dir):
 
     direct_similarity = _compare_feature_bundles(source_sig["features"], target_sig["features"])
     mirrored_similarity = _compare_feature_bundles(source_sig["features"], target_sig["mirrored_features"])
-    face_bonus = 0.05 if source_sig["has_face"] and target_sig["has_face"] else 0.0
+    face_bonus = 0.10 if source_sig["has_face"] and target_sig["has_face"] else 0.0
 
     return float(min(1.0, max(direct_similarity, mirrored_similarity) + face_bonus))
 

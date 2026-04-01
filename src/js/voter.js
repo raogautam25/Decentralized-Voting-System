@@ -110,9 +110,6 @@ class VoterDashboard {
 
   resetVerificationUi() {
     try {
-      const manual = document.getElementById('manualQrToken');
-      if (manual) manual.value = '';
-
       const details = document.getElementById('scannedVoterDetails');
       if (details) details.innerHTML = '';
 
@@ -136,7 +133,6 @@ class VoterDashboard {
         this.qrDetected = true;
         this.captureDone = true;
         this.activeQrToken = this.verifiedVoter.qr_token || '';
-        document.getElementById('manualQrToken').value = this.activeQrToken;
         this.setMsg('verifyMsg', `Verified: ${this.verifiedVoter.full_name} (${this.verifiedVoter.voter_id})`);
         this.renderScannedVoter(this.verifiedVoter);
       } catch {
@@ -203,7 +199,6 @@ class VoterDashboard {
       this.verifiedVoter = null;
       this.autoVerifying = false;
       localStorage.removeItem('verifiedVoter');
-      document.getElementById('manualQrToken').value = '';
       this.updateActionButtons();
       this.applyVoteGuard();
 
@@ -236,7 +231,7 @@ class VoterDashboard {
         this.scanTimer = setInterval(() => this.scanFrameWithJsQr(), 700);
         this.setMsg('verifyMsg', 'QR auto scan started (jsQR fallback for Brave).');
       } else {
-        this.setMsg('verifyMsg', 'QR auto scan unsupported. Manual token paste karke confirm karo.', true);
+        this.setMsg('verifyMsg', 'QR auto scan unsupported in this browser. Use a camera-supported browser/device.', true);
       }
     } catch (e) {
       this.setMsg('verifyMsg', `Camera error: ${e.message}`, true);
@@ -277,7 +272,6 @@ class VoterDashboard {
         const token = String(decodedText || '').trim();
         if (!token || token === this.lastDetectedToken) return;
         this.lastDetectedToken = token;
-        document.getElementById('manualQrToken').value = token;
         await this.handleTokenDetected(token);
       },
       () => {
@@ -298,7 +292,6 @@ class VoterDashboard {
         const token = barcodes[0].rawValue;
         if (token && token !== this.lastDetectedToken) {
           this.lastDetectedToken = token;
-          document.getElementById('manualQrToken').value = token;
           await this.handleTokenDetected(token);
         }
       }
@@ -324,7 +317,6 @@ class VoterDashboard {
         const token = String(code.data).trim();
         if (token && token !== this.lastDetectedToken) {
           this.lastDetectedToken = token;
-          document.getElementById('manualQrToken').value = token;
           await this.handleTokenDetected(token);
         }
       }
@@ -451,8 +443,8 @@ class VoterDashboard {
       this.setMsg('verifyMsg', 'Pehle QR scan karo.', true);
       return;
     }
-    this.setMsg('verifyMsg', 'Hold still... capturing in 2 seconds.');
-    await new Promise((r) => setTimeout(r, 2000));
+    this.setMsg('verifyMsg', 'Hold still... capturing in 3 seconds.');
+    await new Promise((r) => setTimeout(r, 3000));
     this.captureOnVoteDayImage();
   }
 
@@ -548,9 +540,9 @@ class VoterDashboard {
       this.setMsg('verifyMsg', 'Election is currently stopped. Verification cannot continue.', true);
       return;
     }
-    const qrToken = this.activeQrToken || document.getElementById('manualQrToken')?.value?.trim();
+    const qrToken = String(this.activeQrToken || '').trim();
     if (!qrToken) {
-      this.setMsg('verifyMsg', 'QR token missing.', true);
+      this.setMsg('verifyMsg', 'QR token missing. Please scan the voter QR again.', true);
       return;
     }
     if (!this.onVoteDayImage) {

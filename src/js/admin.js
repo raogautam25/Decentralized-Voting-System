@@ -206,6 +206,20 @@ class AdminTools {
         output.width,
         output.height
       );
+
+      if (faceBox?.width && faceBox?.height) {
+        const relativeFaceX = ((faceBox.x - crop.sx) / crop.sw) * output.width;
+        const relativeFaceY = ((faceBox.y - crop.sy) / crop.sh) * output.height;
+        const relativeFaceW = (faceBox.width / crop.sw) * output.width;
+        const relativeFaceH = (faceBox.height / crop.sh) * output.height;
+        this.applyPortraitMask(outputCtx, output.width, output.height, {
+          x: relativeFaceX,
+          y: relativeFaceY,
+          width: relativeFaceW,
+          height: relativeFaceH,
+        });
+      }
+
       return output.toDataURL('image/jpeg', 0.95);
     } catch {
       return photoData;
@@ -263,6 +277,26 @@ class AdminTools {
     const preferredTop = height * 0.1;
     const sy = clamp(preferredTop, 0, height - safeCropSize);
     return { sx, sy, sw: safeCropSize, sh: safeCropSize };
+  }
+
+  applyPortraitMask(ctx, width, height, faceBox) {
+    const centerX = faceBox.x + (faceBox.width / 2);
+    const centerY = faceBox.y + (faceBox.height * 0.58);
+    const radiusX = Math.max(faceBox.width * 0.82, width * 0.2);
+    const radiusY = Math.max(faceBox.height * 1.08, height * 0.28);
+
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = width;
+    maskCanvas.height = height;
+    const maskCtx = maskCanvas.getContext('2d');
+    maskCtx.fillStyle = '#ffffff';
+    maskCtx.fillRect(0, 0, width, height);
+    maskCtx.globalCompositeOperation = 'destination-out';
+    maskCtx.beginPath();
+    maskCtx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
+    maskCtx.fill();
+
+    ctx.drawImage(maskCanvas, 0, 0);
   }
 
   async renderCard(data, photoData) {
