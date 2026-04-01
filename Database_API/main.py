@@ -10,6 +10,7 @@ import secrets
 import string
 import traceback
 import uuid
+from urllib import error as urllib_error
 from urllib import request as urllib_request
 from urllib.parse import urlparse
 
@@ -68,6 +69,11 @@ VOTER_ID_ALPHABET = string.ascii_uppercase + string.digits
 PRIMARY_ELECTION_CONFIG_ID = "primary"
 LIVE_FACE_VERIFICATION_THRESHOLD = float(os.environ.get("LIVE_FACE_VERIFICATION_THRESHOLD", "0.90"))
 CHAIN_RPC_URL = str(os.environ.get("RPC_URL", "https://ethereum-sepolia-rpc.publicnode.com")).strip()
+CHAIN_RPC_FALLBACK_URLS = [
+    item.strip()
+    for item in str(os.environ.get("RPC_FALLBACK_URLS", "")).split(",")
+    if item.strip()
+]
 CHAIN_CONTRACT_ADDRESS = str(os.environ.get("VOTING_CONTRACT_ADDRESS", "")).strip().lower()
 GET_COUNT_CANDIDATES_SELECTOR = "0x0a84a217"
 GET_CANDIDATE_SELECTOR = "0x35b8e820"
@@ -76,6 +82,20 @@ VOTE_CAST_EVENT_TOPIC = "0xb4cfecf70861b7b150d8337780d34fb4cbc2114b5fb1fe51a5c5f
 mongo_client = None
 mongo_db = None
 collections = {}
+
+
+def resolve_chain_rpc_urls():
+    candidates = [
+        CHAIN_RPC_URL,
+        *CHAIN_RPC_FALLBACK_URLS,
+        "https://ethereum-sepolia.publicnode.com",
+    ]
+    urls = []
+    for candidate in candidates:
+        normalized = str(candidate or "").strip()
+        if normalized and normalized not in urls:
+            urls.append(normalized)
+    return urls
 
 
 def normalize_mongo_uri(raw_value):
@@ -213,7 +233,8 @@ def save_image_from_data_url(data_url, prefix):
 
 
 def rpc_call(method, params):
-    if not CHAIN_RPC_URL:
+    rpc_urls = resolve_chain_rpc_urls()
+    if not rpc_urls:
         raise HTTPException(
             status_code=503,
             detail="Blockchain live report is unavailable because RPC_URL is not configured on the backend.",
@@ -222,21 +243,46 @@ def rpc_call(method, params):
     payload = json.dumps(
         {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
     ).encode("utf-8")
-    http_request = urllib_request.Request(
-        CHAIN_RPC_URL,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib_request.urlopen(http_request, timeout=15) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except Exception as error:
-        raise HTTPException(status_code=502, detail=f"Blockchain RPC request failed: {error}")
+    failures = []
 
-    if data.get("error"):
-        raise HTTPException(status_code=502, detail=f"Blockchain RPC error: {data['error']}")
-    return data.get("result")
+    for rpc_url in rpc_urls:
+        http_request = urllib_request.Request(
+            rpc_url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib_request.urlopen(http_request, timeout=15) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except urllib_error.HTTPError as error:
+            response_body = ""
+            try:
+                response_body = error.read().decode("utf-8", errors="ignore").strip()
+            except Exception:
+                response_body = ""
+            detail = f"{rpc_url} -> HTTP {getattr(error, 'code', 'error')}"
+            if response_body:
+                detail += f" {response_body[:180]}"
+            failures.append(detail)
+            continue
+        except Exception as error:
+            failures.append(f"{rpc_url} -> {error}")
+            continue
+
+        if data.get("error"):
+            rpc_error = data["error"]
+            rpc_error_text = str(rpc_error)
+            lowered_error_text = rpc_error_text.lower()
+            if any(token in lowered_error_text for token in ("forbidden", "denied", "limit", "temporar", "unavailable")):
+                failures.append(f"{rpc_url} -> RPC error {rpc_error_text}")
+                continue
+            raise HTTPException(status_code=502, detail=f"Blockchain RPC error: {rpc_error}")
+
+        return data.get("result")
+
+    failure_summary = " | ".join(failures) if failures else "Unknown RPC transport failure"
+    raise HTTPException(status_code=502, detail=f"Blockchain RPC request failed: {failure_summary}")
 
 
 def hex_to_int(value):
