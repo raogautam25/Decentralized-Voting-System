@@ -462,6 +462,7 @@ app.all(
     '/admin/election/stop',
     '/admin/election/restart',
     '/admin/vote-audit/export',
+    '/admin/vote-audit/summary',
     '/admin/database/clear',
     '/admin/candidate-nominations',
     '/admin/candidate-nominations/check',
