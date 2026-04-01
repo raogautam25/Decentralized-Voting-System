@@ -400,6 +400,28 @@ def verify_vote_tx_hash(tx_hash, expected_candidate_id):
     raise HTTPException(status_code=409, detail="VoteCast event not found for the configured voting contract")
 
 
+def should_persist_unverified_audit(chain_error):
+    if not isinstance(chain_error, HTTPException):
+        return False
+
+    detail = str(chain_error.detail or "").strip().lower()
+    if chain_error.status_code in {502, 503}:
+        return True
+
+    if "transaction receipt not found yet" in detail:
+        return True
+
+    recoverable_markers = (
+        "blockchain rpc",
+        "rpc_url",
+        "voting_contract_address",
+        "configured voting contract",
+        "temporar",
+        "unavailable",
+    )
+    return any(marker in detail for marker in recoverable_markers)
+
+
 def ensure_schema():
     voters = collections["voters"]
     candidates = collections["candidates"]
@@ -1237,7 +1259,19 @@ async def save_vote_audit(request: Request):
                 return {"message": "Vote feedback saved"}
             raise HTTPException(status_code=409, detail="Vote audit already exists for this voter")
 
-        chain_vote = verify_vote_tx_hash(tx_hash, candidate_id)
+        chain_vote = None
+        chain_verified = False
+        chain_verification_error = None
+        chain_verification_status = "pending"
+
+        try:
+            chain_vote = verify_vote_tx_hash(tx_hash, candidate_id)
+            chain_verified = True
+            chain_verification_status = "verified"
+        except HTTPException as chain_error:
+            if not should_persist_unverified_audit(chain_error):
+                raise
+            chain_verification_error = str(chain_error.detail)
 
         voted_at = utc_now()
         audit_record = {
@@ -1254,11 +1288,13 @@ async def save_vote_audit(request: Request):
             "on_vote_day_image_mime": on_vote_day_mime,
             "tx_hash": tx_hash,
             "voted_at": voted_at,
-            "chain_verified": True,
-            "chain_candidate_id": chain_vote["candidate_id"],
-            "chain_block_number": chain_vote["block_number"],
-            "chain_voter_address": chain_vote["voter_address"],
-            "chain_timestamp": chain_vote["timestamp"],
+            "chain_verified": chain_verified,
+            "chain_verification_status": chain_verification_status,
+            "chain_verification_error": chain_verification_error,
+            "chain_candidate_id": chain_vote["candidate_id"] if chain_vote else None,
+            "chain_block_number": chain_vote["block_number"] if chain_vote else None,
+            "chain_voter_address": chain_vote["voter_address"] if chain_vote else None,
+            "chain_timestamp": chain_vote["timestamp"] if chain_vote else None,
         }
         if feedback_details:
             audit_record.update(
@@ -1283,7 +1319,19 @@ async def save_vote_audit(request: Request):
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(err))
 
-    return {"message": "Vote audit saved"}
+    if not audit_record["chain_verified"]:
+        return {
+            "message": "Vote audit saved. Blockchain verification is pending on the backend.",
+            "chain_verified": False,
+            "chain_verification_status": audit_record["chain_verification_status"],
+            "chain_verification_error": audit_record["chain_verification_error"],
+        }
+
+    return {
+        "message": "Vote audit saved",
+        "chain_verified": True,
+        "chain_verification_status": audit_record["chain_verification_status"],
+    }
 
 
 @app.get("/vote/report")
@@ -1360,6 +1408,40 @@ async def export_vote_audit(request: Request):
 
     headers = {"Content-Disposition": "attachment; filename=vote_audit_report.csv", "Cache-Control": "no-store"}
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers=headers)
+
+
+@app.get("/admin/vote-audit/summary")
+async def get_vote_audit_summary():
+    pipeline = [
+        {
+            "$group": {
+                "_id": {"candidate_name": "$candidate_name", "party": "$party"},
+                "vote_count": {"$sum": 1},
+                "updated_at": {"$max": "$voted_at"}
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "candidate_name": "$_id.candidate_name",
+                "party": "$_id.party",
+                "vote_count": 1,
+                "updated_at": {"$dateToString": {"date": "$updated_at", "format": "%Y-%m-%d %H:%M:%S"}}
+            }
+        },
+        {"$sort": {"vote_count": -1}}
+    ]
+    results = list(coll("vote_audit").aggregate(pipeline))
+    items = []
+    for rank, item in enumerate(results, 1):
+        items.append({
+            "rank_position": rank,
+            "candidate_name": item["candidate_name"],
+            "party": item["party"],
+            "vote_count": item["vote_count"],
+            "updated_at": item["updated_at"]
+        })
+    return {"items": items}
 
 
 @app.get("/admin/vote-audit/image/{audit_id}")

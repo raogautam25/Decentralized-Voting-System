@@ -7,8 +7,10 @@ const mongoose = require('mongoose');
 require('dotenv').config();
 
 const app = express();
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: false }));
+// Image-backed voter registration and vote-audit requests can easily exceed 1 MB once
+// base64 payloads are proxied through Express on their way to FastAPI.
+app.use(express.json({ limit: '12mb' }));
+app.use(express.urlencoded({ extended: false, limit: '12mb' }));
 
 const jwtSecret = process.env.JWT_SECRET || process.env.SECRET_KEY || 'your_super_secret_key';
 const databaseApiBase = String(

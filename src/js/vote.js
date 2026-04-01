@@ -618,6 +618,7 @@ class VoteConfirmation {
         await this.saveVoteAudit(auditPayload);
       } catch (e) {
         // Do not block successful on-chain vote; loading page will retry sync.
+        localStorage.setItem('pendingVoteAuditError', e?.message || 'Vote audit sync deferred');
         console.warn('Vote audit sync deferred:', e?.message || e);
       }
       window.location.href = './loading.html';
@@ -684,11 +685,12 @@ class VoteConfirmation {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       throw new Error(data.detail || 'Vote audit save failed');
     }
     localStorage.removeItem('pendingVoteAudit');
+    localStorage.removeItem('pendingVoteAuditError');
   }
 
   showVoteError(errorMessage) {

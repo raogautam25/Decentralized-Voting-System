@@ -501,7 +501,14 @@ class AdminTools {
   async fetchLiveReport() {
     const body = byId('liveReportBody');
     try {
-      const data = await fetchJson(`${API_BASE}/vote/report`);
+      // First try to fetch audit summary
+      let data = await fetchJson(`${API_BASE}/admin/vote-audit/summary`);
+      let isAudit = true;
+      if (!data.items || data.items.length === 0) {
+        // Fallback to on-chain results
+        data = await fetchJson(`${API_BASE}/vote/report`);
+        isAudit = false;
+      }
       if (!body) return;
       body.innerHTML = '';
       if (!data.items || data.items.length === 0) {
@@ -519,7 +526,8 @@ class AdminTools {
           `;
         }
       }
-      setStatus(byId('liveReportMsg'), 'Live report auto-refresh every 4s.');
+      const source = isAudit ? 'audit data' : 'blockchain';
+      setStatus(byId('liveReportMsg'), `Live report from ${source} auto-refresh every 4s.`);
     } catch (e) {
       if (body) {
         body.innerHTML = '<tr><td colspan="5">Blockchain report unavailable. Configure backend RPC and contract address, then restart the API.</td></tr>';

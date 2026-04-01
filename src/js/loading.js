@@ -49,6 +49,67 @@ class LoadingManager {
     this.checkTransactionStatus();
   }
 
+  readPendingAuditQueue() {
+    const raw = localStorage.getItem('pendingVoteAuditQueue');
+    const parsed = raw ? safeJsonParse(raw, []) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  }
+
+  writePendingAuditQueue(items) {
+    if (!Array.isArray(items) || items.length === 0) {
+      localStorage.removeItem('pendingVoteAuditQueue');
+      return;
+    }
+    localStorage.setItem('pendingVoteAuditQueue', JSON.stringify(items));
+  }
+
+  archivePendingAuditForRetry() {
+    const raw = localStorage.getItem('pendingVoteAudit');
+    const payload = raw ? safeJsonParse(raw, null) : null;
+    if (!payload?.tx_hash) {
+      localStorage.removeItem('pendingVoteAudit');
+      return;
+    }
+
+    const queue = this.readPendingAuditQueue();
+    if (!queue.some((item) => item?.tx_hash && item.tx_hash === payload.tx_hash)) {
+      queue.push(payload);
+      this.writePendingAuditQueue(queue);
+    }
+    localStorage.removeItem('pendingVoteAudit');
+  }
+
+  async syncQueuedAudits() {
+    const queue = this.readPendingAuditQueue();
+    if (queue.length === 0) return;
+
+    const remaining = [];
+    for (const payload of queue) {
+      try {
+        const res = await fetch(`${API_BASE}/vote/audit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          remaining.push(payload);
+          localStorage.setItem('pendingVoteAuditError', data.detail || data.message || `Vote audit sync failed (HTTP ${res.status})`);
+          continue;
+        }
+        localStorage.removeItem('pendingVoteAuditError');
+        if (data?.message) {
+          localStorage.setItem('lastAuditSyncMessage', String(data.message));
+        }
+      } catch (error) {
+        remaining.push(payload);
+        localStorage.setItem('pendingVoteAuditError', error?.message || 'Pending audit sync failed');
+      }
+    }
+
+    this.writePendingAuditQueue(remaining);
+  }
+
   async checkTransactionStatus() {
     if (this.finalized) {
       return;
@@ -95,6 +156,7 @@ class LoadingManager {
         this.finalized = true;
         clearInterval(this.updateInterval);
         this.persistLastTransactionSummary();
+        await this.syncQueuedAudits();
         await this.syncPendingAudit();
         this.updateDoneMessage();
         await this.handleOptionalFeedback();
@@ -133,8 +195,18 @@ class LoadingManager {
     const msg = document.getElementById('loadingMessage');
     const info = document.getElementById('loadingInfo');
     const short = this.transactionHash ? this.shortenHash(this.transactionHash) : '';
+    const auditMessage = localStorage.getItem('lastAuditSyncMessage') || '';
+    const auditError = localStorage.getItem('pendingVoteAuditError') || '';
     if (msg) msg.textContent = `Vote confirmed${short ? ` (Tx ${short})` : ''}.`;
-    if (info) info.textContent = 'Optional feedback is available. Submit or skip to continue.';
+    if (info) {
+      if (auditError) {
+        info.textContent = `Vote confirmed on-chain. Backend audit sync is pending: ${auditError}`;
+      } else if (auditMessage) {
+        info.textContent = `${auditMessage} Optional feedback is available. Submit or skip to continue.`;
+      } else {
+        info.textContent = 'Optional feedback is available. Submit or skip to continue.';
+      }
+    }
   }
 
   persistLastTransactionSummary() {
@@ -163,6 +235,8 @@ class LoadingManager {
   }
 
   logoutForNextVoter() {
+    this.archivePendingAuditForRetry();
+
     // Enforce one voter session per vote.
     // Keep admin token intact; only wipe voter session + vote flow state.
     localStorage.removeItem('jwtTokenVoter');
@@ -177,6 +251,7 @@ class LoadingManager {
     localStorage.removeItem('txError');
     localStorage.removeItem('txStatus');
     localStorage.removeItem('pendingVoteFeedback');
+    localStorage.removeItem('pendingVoteAuditError');
 
     // Used by voter.js to force fresh verification if the user navigates back.
     localStorage.setItem('lastVoteCompleted', '1');
@@ -193,10 +268,18 @@ class LoadingManager {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         localStorage.removeItem('pendingVoteAudit');
+        localStorage.removeItem('pendingVoteAuditError');
+        if (data?.message) {
+          localStorage.setItem('lastAuditSyncMessage', String(data.message));
+        }
+        return;
       }
+      localStorage.setItem('pendingVoteAuditError', data.detail || data.message || `Vote audit sync failed (HTTP ${res.status})`);
     } catch (error) {
+      localStorage.setItem('pendingVoteAuditError', error?.message || 'Pending audit sync failed');
       console.warn('Pending audit sync failed:', error);
     }
   }
@@ -230,6 +313,7 @@ class LoadingManager {
         }
         completed = true;
         localStorage.removeItem('pendingVoteFeedback');
+        localStorage.removeItem('lastAuditSyncMessage');
         feedbackInput.removeEventListener('input', handleInput);
         submitButton.removeEventListener('click', handleSubmit);
         skipButton.removeEventListener('click', handleSkip);
@@ -268,7 +352,7 @@ class LoadingManager {
           }
         } catch (error) {
           if (feedbackStatus) {
-            feedbackStatus.textContent = 'Feedback could not be saved. Continuing without it.';
+            feedbackStatus.textContent = `Feedback save failed: ${error?.message || 'Unknown error'}. Continuing without it.`;
           }
         } finally {
           finish();
@@ -318,6 +402,10 @@ class LoadingManager {
       throw new Error(data.detail || 'Feedback save failed');
     }
     localStorage.removeItem('pendingVoteAudit');
+    localStorage.removeItem('pendingVoteAuditError');
+    if (data?.message) {
+      localStorage.setItem('lastAuditSyncMessage', String(data.message));
+    }
   }
 
   updateUI(status, confirmations) {

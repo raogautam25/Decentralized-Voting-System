@@ -393,6 +393,7 @@ What happens here:
 - waits for blockchain transaction confirmation
 - tracks receipt status
 - saves audit data when confirmed
+- if backend RPC verification is temporarily unavailable, it keeps the audit for retry and can still store the audit row with pending blockchain verification instead of silently losing the data
 - optionally stores feedback
 - clears stale session state for next voter
 
