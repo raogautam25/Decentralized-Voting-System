@@ -31,8 +31,17 @@ from vote_prediction import generate_vote_prediction_report
 BASE_DIR = os.path.dirname(__file__)
 ROOT_DIR = os.path.dirname(BASE_DIR)
 
-dotenv.load_dotenv(os.path.join(BASE_DIR, ".env"), override=False)
-dotenv.load_dotenv(os.path.join(ROOT_DIR, ".env"), override=False)
+
+def is_render_runtime():
+    return any(
+        str(os.environ.get(key, "")).strip()
+        for key in ("RENDER", "RENDER_SERVICE_ID", "RENDER_INSTANCE_ID", "RENDER_EXTERNAL_URL")
+    )
+
+
+if not is_render_runtime():
+    dotenv.load_dotenv(os.path.join(BASE_DIR, ".env"), override=False)
+    dotenv.load_dotenv(os.path.join(ROOT_DIR, ".env"), override=False)
 
 app = FastAPI()
 

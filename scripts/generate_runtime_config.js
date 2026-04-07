@@ -1,7 +1,18 @@
 const fs = require('fs');
 const path = require('path');
 
-require('dotenv').config();
+function isRenderRuntime() {
+  return [
+    process.env.RENDER,
+    process.env.RENDER_SERVICE_ID,
+    process.env.RENDER_INSTANCE_ID,
+    process.env.RENDER_EXTERNAL_URL,
+  ].some((value) => String(value || '').trim() !== '');
+}
+
+if (!isRenderRuntime()) {
+  require('dotenv').config();
+}
 
 const outputPath = path.join(__dirname, '..', 'src', 'js', 'runtime-config.js');
 

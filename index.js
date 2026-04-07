@@ -4,7 +4,18 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 
-require('dotenv').config();
+function isRenderRuntime() {
+  return [
+    process.env.RENDER,
+    process.env.RENDER_SERVICE_ID,
+    process.env.RENDER_INSTANCE_ID,
+    process.env.RENDER_EXTERNAL_URL,
+  ].some((value) => String(value || '').trim() !== '');
+}
+
+if (!isRenderRuntime()) {
+  require('dotenv').config();
+}
 
 const app = express();
 // Image-backed voter registration and vote-audit requests can easily exceed 1 MB once
@@ -325,6 +336,21 @@ async function ensureMongoConnection({ verify = false } = {}) {
   return mongoReadyPromise;
 }
 
+app.get('/js/runtime-config.js', (_req, res) => {
+  res.type('application/javascript');
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.send(
+    [
+      `window.__API_BASE__ = ${JSON.stringify(process.env.FRONTEND_API_BASE || '')};`,
+      `window.__RPC_URL__ = ${JSON.stringify(rpcUrl)};`,
+      `window.__CHAIN_ID__ = ${JSON.stringify(chainId)};`,
+      `window.__VOTING_ADDRESS__ = ${JSON.stringify(votingContractAddress)};`,
+    ].join('\n')
+  );
+});
+
 // Serve static frontend assets
 app.use('/css', express.static(path.join(__dirname, 'src/css')));
 app.use('/js', express.static(path.join(__dirname, 'src/js')));
@@ -433,18 +459,6 @@ app.get('/assets/eth5.jpg', (req, res) => {
 
 app.get('/js/app.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'src/js/app.js'));
-});
-
-app.get('/js/runtime-config.js', (_req, res) => {
-  res.type('application/javascript');
-  res.send(
-    [
-      `window.__API_BASE__ = ${JSON.stringify(process.env.FRONTEND_API_BASE || '')};`,
-      `window.__RPC_URL__ = ${JSON.stringify(rpcUrl)};`,
-      `window.__CHAIN_ID__ = ${JSON.stringify(chainId)};`,
-      `window.__VOTING_ADDRESS__ = ${JSON.stringify(votingContractAddress)};`,
-    ].join('\n')
-  );
 });
 
 app.get('/admin.html', authorizeUser, (req, res) => {
