@@ -103,7 +103,7 @@ FastAPI + MongoDB
 ### 1. Smart Contract
 
 File:
-- [contracts/Voting.sol](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/contracts/Voting.sol)
+- [contracts/Voting.sol](/Decentralized-Voting-System/contracts/Voting.sol)
 
 What it does:
 - stores candidates on-chain
@@ -158,7 +158,7 @@ Advantage:
 ### 4. Node / Express Layer
 
 File:
-- [index.js](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/index.js)
+- [index.js](/Decentralized-Voting-System/index.js)
 
 What it does:
 - serves frontend pages
@@ -176,7 +176,7 @@ Why it exists:
 ### 5. FastAPI + MongoDB Layer
 
 File:
-- [Database_API/main.py](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/Database_API/main.py)
+- [Database_API/main.py](/Decentralized-Voting-System/Database_API/main.py)
 
 What it does:
 - connects to MongoDB
@@ -220,7 +220,7 @@ Render hosts the cloud services:
 - FastAPI backend service
 
 Current Render blueprint file:
-- [render.yaml](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/render.yaml)
+- [render.yaml](/Decentralized-Voting-System/render.yaml)
 
 It now defines both the Node service and the Python service. The FastAPI service starts with:
 
@@ -287,7 +287,7 @@ Advantage:
 
 ### Admin flow
 
-1. Deploy [Voting.sol](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/contracts/Voting.sol) from Remix.
+1. Deploy [Voting.sol](/Decentralized-Voting-System/contracts/Voting.sol) from Remix.
 2. Copy the deployed contract address into `VOTING_CONTRACT_ADDRESS`.
 3. Configure `RPC_URL`, `CHAIN_ID`, MongoDB URI, and backend/frontend base URLs.
 4. Start FastAPI.
@@ -320,7 +320,7 @@ Advantage:
 
 ## Pages and Their Advantages
 
-## [src/html/login.html](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/html/login.html)
+## [src/html/login.html](/Decentralized-Voting-System/src/html/login.html)
 
 Purpose:
 - entry point for both admin and voter users
@@ -335,7 +335,7 @@ Advantage:
 - one controlled entry point
 - simpler role-based routing
 
-## [src/html/admin.html](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/html/admin.html)
+## [src/html/admin.html](/Decentralized-Voting-System/src/html/admin.html)
 
 Purpose:
 - main operations dashboard for election management
@@ -356,7 +356,7 @@ Advantage:
 - practical for election-day operations
 - duplicate-save protection helps prevent accidental repeated voter-card generation from repeated clicks
 
-## [src/html/candidate_nomination.html](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/html/candidate_nomination.html)
+## [src/html/candidate_nomination.html](/Decentralized-Voting-System/src/html/candidate_nomination.html)
 
 Purpose:
 - isolated candidate nomination workflow
@@ -371,7 +371,7 @@ Advantage:
 - keeps candidate management separate from the larger admin page
 - easier validation and maintenance
 
-## [src/html/vote.html](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/html/vote.html)
+## [src/html/vote.html](/Decentralized-Voting-System/src/html/vote.html)
 
 Purpose:
 - voter verification and EVM-style vote selection page
@@ -390,7 +390,7 @@ Advantage:
 - combines identity verification and vote interaction in one controlled flow
 - removes the insecure manual QR-token entry path so random pasted tokens cannot be used for voting
 
-## [src/html/loading.html](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/html/loading.html)
+## [src/html/loading.html](/Decentralized-Voting-System/src/html/loading.html)
 
 Purpose:
 - post-vote confirmation and audit sync page
@@ -407,7 +407,7 @@ Advantage:
 - avoids silent failures after wallet confirmation
 - improves reliability between chain confirmation and database audit
 
-## [src/html/verify_vote.html](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/html/verify_vote.html)
+## [src/html/verify_vote.html](/Decentralized-Voting-System/src/html/verify_vote.html)
 
 Purpose:
 - public/self-service transaction verification page
@@ -421,7 +421,7 @@ Advantage:
 - improves transparency
 - lets users independently validate a vote transaction
 
-## [src/html/explorer.html](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/html/explorer.html)
+## [src/html/explorer.html](/Decentralized-Voting-System/src/html/explorer.html)
 
 Purpose:
 - public explorer for results and recent vote activity
@@ -436,7 +436,7 @@ Advantage:
 
 ## Frontend JavaScript Modules
 
-## [src/js/app.js](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/js/app.js)
+## [src/js/app.js](/Decentralized-Voting-System/src/js/app.js)
 
 Role:
 - blockchain integration layer for the browser
@@ -454,7 +454,7 @@ Responsibilities:
 Advantage:
 - one reusable blockchain module used across pages
 
-## [src/js/admin.js](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/js/admin.js)
+## [src/js/admin.js](/Decentralized-Voting-System/src/js/admin.js)
 
 Role:
 - admin dashboard behavior
@@ -475,7 +475,7 @@ Responsibilities:
 Advantage:
 - avoids large inline script blocks in HTML
 
-## [src/js/voter.js](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/js/voter.js)
+## [src/js/voter.js](/Decentralized-Voting-System/src/js/voter.js)
 
 Role:
 - QR scan and voter confirmation flow
@@ -493,7 +493,7 @@ Advantage:
 - protects voting page from stale identity reuse
 - no longer relies on manual QR token entry for actual verification
 
-## [src/js/vote.js](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/js/vote.js)
+## [src/js/vote.js](/Decentralized-Voting-System/src/js/vote.js)
 
 Role:
 - final vote confirmation logic
@@ -509,7 +509,7 @@ Advantage:
 - separates verification from final vote submission logic
 - keeps the post-verification vote flow intact after the backend confirms that the live voter matches the voter-card photo
 
-## [src/js/loading.js](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/js/loading.js)
+## [src/js/loading.js](/Decentralized-Voting-System/src/js/loading.js)
 
 Role:
 - blockchain confirmation watcher and backend sync helper
@@ -524,7 +524,7 @@ Responsibilities:
 Advantage:
 - prevents partial vote completion flows
 
-## [src/js/verify_vote.js](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/js/verify_vote.js)
+## [src/js/verify_vote.js](/Decentralized-Voting-System/src/js/verify_vote.js)
 
 Role:
 - transaction verification UI logic
@@ -532,7 +532,7 @@ Role:
 Advantage:
 - dedicated, simple, user-facing proof screen
 
-## [src/js/explorer.js](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/js/explorer.js)
+## [src/js/explorer.js](/Decentralized-Voting-System/src/js/explorer.js)
 
 Role:
 - public result/explorer logic
@@ -540,7 +540,7 @@ Role:
 Advantage:
 - separates public visibility concerns from admin controls
 
-## [src/js/login-page.js](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/js/login-page.js)
+## [src/js/login-page.js](/Decentralized-Voting-System/src/js/login-page.js)
 
 Role:
 - role-aware login logic
@@ -548,7 +548,7 @@ Role:
 Advantage:
 - keeps authentication behavior simple and isolated
 
-## [src/js/config.js](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/js/config.js)
+## [src/js/config.js](/Decentralized-Voting-System/src/js/config.js)
 
 Role:
 - frontend config resolver
@@ -556,7 +556,7 @@ Role:
 Advantage:
 - central place for frontend base URLs
 
-## [src/js/runtime-config.js](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/js/runtime-config.js)
+## [src/js/runtime-config.js](/Decentralized-Voting-System/src/js/runtime-config.js)
 
 Role:
 - generated browser runtime configuration
@@ -570,7 +570,7 @@ Stores:
 Advantage:
 - same frontend code can be deployed to different environments
 
-## [src/js/utils.js](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/src/js/utils.js)
+## [src/js/utils.js](/Decentralized-Voting-System/src/js/utils.js)
 
 Role:
 - shared DOM/network/helper utilities
@@ -580,7 +580,7 @@ Advantage:
 
 ## Backend Modules
 
-## [Database_API/main.py](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/Database_API/main.py)
+## [Database_API/main.py](/Decentralized-Voting-System/Database_API/main.py)
 
 Main backend responsibilities:
 
@@ -598,7 +598,7 @@ Main backend responsibilities:
 - audit export endpoints
 - database clear endpoint
 
-## [Database_API/duplicate_detection.py](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/Database_API/duplicate_detection.py)
+## [Database_API/duplicate_detection.py](/Decentralized-Voting-System/Database_API/duplicate_detection.py)
 
 Role:
 - duplicate face and near-match detection
@@ -607,7 +607,7 @@ Why it matters:
 - prevents same person from registering multiple times under different names
 - reduces accidental duplicate voter-card generation even when the same user changes pose slightly during registration
 
-## [Database_API/sentiment.py](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/Database_API/sentiment.py)
+## [Database_API/sentiment.py](/Decentralized-Voting-System/Database_API/sentiment.py)
 
 Role:
 - feedback sentiment analysis
@@ -615,7 +615,7 @@ Role:
 Advantage:
 - turns voter feedback into candidate-level summary data
 
-## [Database_API/vote_prediction.py](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/Database_API/vote_prediction.py)
+## [Database_API/vote_prediction.py](/Decentralized-Voting-System/Database_API/vote_prediction.py)
 
 Role:
 - simple vote trend forecasting
@@ -623,7 +623,7 @@ Role:
 Advantage:
 - helps admins interpret incomplete elections
 
-## [Database_API/anomaly_detection.py](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/Database_API/anomaly_detection.py)
+## [Database_API/anomaly_detection.py](/Decentralized-Voting-System/Database_API/anomaly_detection.py)
 
 Role:
 - suspicious vote-rate pattern detection
@@ -636,7 +636,7 @@ Advantage:
 ### Express routes
 
 Defined in:
-- [index.js](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/index.js)
+- [index.js](/Decentralized-Voting-System/index.js)
 
 Important page routes:
 
@@ -652,7 +652,7 @@ Important page routes:
 ### FastAPI routes
 
 Defined in:
-- [Database_API/main.py](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/Database_API/main.py)
+- [Database_API/main.py](/Decentralized-Voting-System/Database_API/main.py)
 
 Important API routes:
 
@@ -847,7 +847,7 @@ They should not reuse:
 
 ### Recommended replacement checklist
 
-1. Deploy a new instance of [contracts/Voting.sol](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/contracts/Voting.sol) from Remix.
+1. Deploy a new instance of [contracts/Voting.sol](/Decentralized-Voting-System/contracts/Voting.sol) from Remix.
 2. Copy the new deployed contract address into `VOTING_CONTRACT_ADDRESS`.
 3. Create a new MongoDB Atlas database and use a new `MONGODB_URI`.
 4. Create a new RPC/API key from a provider such as Alchemy.
