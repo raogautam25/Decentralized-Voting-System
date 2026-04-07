@@ -219,14 +219,20 @@ Render hosts the cloud services:
 - Node/Express frontend service
 - FastAPI backend service
 
-Current backend blueprint file:
+Current Render blueprint file:
 - [render.yaml](/c:/Users/DEVAN/Desktop/NTCC/Decentralized-Voting-System/render.yaml)
 
-It currently defines the Python service and starts FastAPI with:
+It now defines both the Node service and the Python service. The FastAPI service starts with:
 
 ```yaml
 startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
+
+Render should be the source of truth for production secrets and URLs.
+
+- Use the Render dashboard or Blueprint environment variables for production values.
+- Keep local `.env` files only for local development.
+- The Node service can now read Render's internal backend `host:port` through `DATABASE_API_INTERNAL_HOSTPORT`, so you do not need to commit a production backend URL into the repo.
 
 ## How This Project Differs From a Typical Existing Setup
 
@@ -789,6 +795,7 @@ For the Node frontend service, the practical variables are usually:
 - `RPC_URL`
 - `VOTING_CONTRACT_ADDRESS`
 - `DATABASE_API_BASE`
+- `DATABASE_API_INTERNAL_HOSTPORT`
 - `MONGODB_URI`
 - `JWT_SECRET` or `SECRET_KEY`
 - `ADMIN_USERNAME`
@@ -808,6 +815,8 @@ For the FastAPI backend service, the practical variables are usually:
 - `FRONTEND_URL`
 - `CORS_ALLOWED_ORIGINS`
 - `LIVE_FACE_VERIFICATION_THRESHOLD`
+
+If you deploy through Render Blueprints, keep secret values as `sync: false` entries in `render.yaml` and then fill the actual values in the Render dashboard for each service.
 
 ## If Someone Deploys This Project On Their Own System
 

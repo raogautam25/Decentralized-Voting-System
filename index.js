@@ -13,11 +13,55 @@ app.use(express.json({ limit: '12mb' }));
 app.use(express.urlencoded({ extended: false, limit: '12mb' }));
 
 const jwtSecret = process.env.JWT_SECRET || process.env.SECRET_KEY || 'your_super_secret_key';
-const databaseApiBase = String(
-  process.env.DATABASE_API_BASE || process.env.FASTAPI_BASE || process.env.API_BASE || 'http://127.0.0.1:8000'
-)
-  .trim()
-  .replace(/\/+$/, '');
+
+function normalizeServiceBaseUrl(rawValue, { defaultProtocol = 'http' } = {}) {
+  let value = String(rawValue || '').trim();
+
+  if (!value) {
+    return '';
+  }
+
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    value = value.slice(1, -1).trim();
+  }
+
+  value = value.replace(/\/+$/, '');
+
+  if (/^[a-z]+:\/\//i.test(value)) {
+    return value;
+  }
+
+  if (/^[a-z0-9.-]+:\d+$/i.test(value)) {
+    return `${defaultProtocol}://${value}`;
+  }
+
+  return value;
+}
+
+function resolveDatabaseApiBase() {
+  const candidates = [
+    process.env.DATABASE_API_BASE,
+    process.env.FASTAPI_BASE,
+    process.env.API_BASE,
+    process.env.DATABASE_API_INTERNAL_URL,
+    process.env.DATABASE_API_HOSTPORT,
+    process.env.DATABASE_API_INTERNAL_HOSTPORT,
+  ];
+
+  for (const rawValue of candidates) {
+    const normalized = normalizeServiceBaseUrl(rawValue);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return 'http://127.0.0.1:8000';
+}
+
+const databaseApiBase = resolveDatabaseApiBase();
 const chainId = String(process.env.CHAIN_ID || '11155111').trim();
 const rpcUrl = String(process.env.RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com').trim();
 const votingContractAddress = String(process.env.VOTING_CONTRACT_ADDRESS || '').trim();

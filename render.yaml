@@ -1,6 +1,51 @@
 services:
   - type: web
-    name: decentralized-voting-api
+    name: decentralized-voting-system
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 22.16.0
+      - key: JWT_SECRET
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_FULL_NAME
+        sync: false
+      - key: CHAIN_ID
+        sync: false
+      - key: RPC_URL
+        sync: false
+      - key: VOTING_CONTRACT_ADDRESS
+        sync: false
+      - key: LIVE_FACE_VERIFICATION_THRESHOLD
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: FRONTEND_API_BASE
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: REQUIRE_MONGO_ON_STARTUP
+        value: "false"
+      - key: DATABASE_API_INTERNAL_HOSTPORT
+        fromService:
+          type: web
+          name: decentralized-voting-db-api
+          property: hostport
+
+  - type: web
+    name: decentralized-voting-db-api
     env: python
     plan: free
     rootDir: Database_API
@@ -9,3 +54,33 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: MONGODB_URI
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: MONGO_DB_NAME
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_FULL_NAME
+        sync: false
+      - key: CHAIN_ID
+        sync: false
+      - key: RPC_URL
+        sync: false
+      - key: RPC_FALLBACK_URLS
+        sync: false
+      - key: VOTING_CONTRACT_ADDRESS
+        sync: false
+      - key: LIVE_FACE_VERIFICATION_THRESHOLD
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: CORS_ALLOW_ORIGIN_REGEX
+        value: https://.*\.vercel\.app
